@@ -1,245 +1,285 @@
-# Deployment Summary
+# AWS Bedrock Agent Core Deployment
 
-## ✅ Deployed Successfully!
+## ✅ Deployment Status
 
 **Repository:** https://github.com/JKevinXu/LangGraphAgentCore
 
-**Branch:** main
+**Deployment Target:** AWS Bedrock Agent Core Runtime
 
-## 📦 What's Deployed
+**Status:** 🟢 Ready to Deploy
 
-### Core Package
-```
-agentcore/
-├── __init__.py      # Exports: Agent, AgentConfig, create_tool
-├── agent.py         # LangGraph agent implementation
-└── tools.py         # Tool decorator
-```
+## 📦 What's Included
 
-### AWS Bedrock Integration 🆕
 ```
-bedrock/
-├── agent_runtime.py    # Bedrock Agent Core Runtime entrypoint
-├── agent_bedrock.py    # Bedrock-specific agent with ChatBedrock
-├── requirements.txt    # Bedrock dependencies
-├── Dockerfile          # Container for deployment
-├── deploy.sh           # Automated deployment script
-└── README.md           # Bedrock deployment guide
-```
-
-### Documentation & Examples
-```
-├── README.md           # Main documentation
-├── example.py          # Basic usage example
-├── install.sh          # Quick installation
-├── DEPLOY.md           # This file
-└── LICENSE             # MIT License
+LangGraphAgentCore/
+├── agentcore/              # Core agent framework
+│   ├── agent.py            # LangGraph agent implementation
+│   ├── tools.py            # Tool decorator
+│   └── __init__.py         # Package exports
+│
+├── bedrock/                # Bedrock deployment files
+│   ├── agent_runtime.py    # Runtime entrypoint (@app.entrypoint)
+│   ├── agent_bedrock.py    # Bedrock-specific agent
+│   ├── Dockerfile          # Container definition
+│   ├── deploy.sh           # Automated deployment
+│   ├── requirements.txt    # Bedrock dependencies
+│   └── README.md           # Deployment guide
+│
+├── example.py              # Local testing
+└── requirements.txt        # Core dependencies
 ```
 
-## 🚀 Deployment Options
+## 🏗️ Architecture
 
-### Option 1: GitHub (Source Code) ✅ DEPLOYED
+```
+┌─────────────────────────────────────────────────────┐
+│         AWS Bedrock Agent Core Runtime              │
+│                                                      │
+│   ┌──────────────┐                                  │
+│   │   Gateway    │                                  │
+│   └──────┬───────┘                                  │
+│          │                                          │
+│          ▼                                          │
+│   ┌─────────────────────────────┐                  │
+│   │  LangGraphAgentCore         │                  │
+│   │                             │                  │
+│   │  ┌──────────┐  ┌─────────┐ │                  │
+│   │  │LangGraph │  │ Bedrock │ │                  │
+│   │  │ Workflow │──│ Claude  │ │                  │
+│   │  └──────────┘  └─────────┘ │                  │
+│   │                             │                  │
+│   │  ┌───────────────────────┐ │                  │
+│   │  │ Custom Tools          │ │                  │
+│   │  │ - calculator          │ │                  │
+│   │  │ - weather             │ │                  │
+│   │  └───────────────────────┘ │                  │
+│   └─────────────────────────────┘                  │
+│          │                                          │
+│          ▼                                          │
+│   ┌──────────────┐                                 │
+│   │  CloudWatch  │                                 │
+│   │  Logs & Metrics                                │
+│   └──────────────┘                                 │
+└─────────────────────────────────────────────────────┘
+```
+
+## 🚀 Deployment Steps
+
+### Prerequisites
+
+1. **AWS Account** with Bedrock access
+2. **AWS CLI** installed and configured
+3. **Docker** installed and running
+4. **Python 3.11+**
+5. **IAM Permissions** for:
+   - Amazon Bedrock
+   - Amazon ECR
+   - CloudWatch Logs
+   - IAM roles
+
+### Step 1: Configure AWS
+
+```bash
+# Configure AWS credentials
+aws configure
+
+# Verify access
+aws sts get-caller-identity
+```
+
+### Step 2: Clone Repository
 
 ```bash
 git clone https://github.com/JKevinXu/LangGraphAgentCore.git
-pip install -r requirements.txt
+cd LangGraphAgentCore/bedrock
 ```
 
-**Status:** ✅ Live at https://github.com/JKevinXu/LangGraphAgentCore
-
-### Option 2: AWS Bedrock Agent Core Runtime 🆕
+### Step 3: Deploy
 
 ```bash
-cd bedrock
+# Make script executable
+chmod +x deploy.sh
+
+# Run deployment
 ./deploy.sh
 ```
 
-**Features:**
-- 🔹 Uses AWS Bedrock models (Claude, Titan, etc.)
-- 🔹 Runs on AWS managed infrastructure
-- 🔹 Auto-scaling and monitoring
-- 🔹 Built-in observability
-- 🔹 Secure IAM integration
+The script will:
+1. ✅ Check prerequisites (AWS CLI, Docker, credentials)
+2. ✅ Install Python dependencies
+3. ✅ Create ECR repository
+4. ✅ Build Docker image
+5. ✅ Push to Amazon ECR
+6. ✅ Output deployment details
 
-**Architecture:**
-```
-┌─────────────────────────────────────────────────┐
-│        AWS Bedrock Agent Core Runtime            │
-│                                                  │
-│  Runtime Gateway                                 │
-│       ↓                                          │
-│  LangGraphAgentCore                              │
-│       ├─→ LangGraph Workflow                     │
-│       ├─→ Bedrock Claude/Titan                   │
-│       └─→ Custom Tools                           │
-│                                                  │
-│  Observability & Logging (CloudWatch)            │
-└─────────────────────────────────────────────────┘
-```
+### Step 4: Configure in AWS Console
 
-**Deployment Steps:**
-1. Configure AWS credentials
-2. Run `cd bedrock && ./deploy.sh`
-3. Script will:
-   - Create ECR repository
-   - Build Docker image
-   - Push to Amazon ECR
-   - Configure runtime
+1. Navigate to **AWS Bedrock Agent Core** console
+2. Create new agent using your ECR image
+3. Configure IAM roles
+4. Set up agent alias
+5. Enable CloudWatch logging
 
-**Invoke Deployed Agent:**
+### Step 5: Test Deployment
+
 ```python
 import boto3
 
 client = boto3.client('bedrock-agent-runtime')
+
 response = client.invoke_agent(
     agentId='your-agent-id',
     agentAliasId='your-alias-id',
-    sessionId='session-123',
+    sessionId='test-session',
     inputText='What is 15 * 23?'
 )
+
+print(response)
 ```
 
-## 📊 Deployment Comparison
+## 🎯 Deployment Features
 
-| Feature | GitHub | Bedrock Agent Core |
-|---------|--------|-------------------|
-| **Status** | ✅ Deployed | 🆕 Ready to deploy |
-| **LLM Models** | OpenAI (via API key) | AWS Bedrock (Claude, Titan) |
-| **Infrastructure** | Self-hosted | AWS Managed |
-| **Scaling** | Manual | Auto-scaling |
-| **Monitoring** | Custom | CloudWatch built-in |
-| **Cost** | OpenAI API + hosting | AWS Bedrock + runtime |
-| **Setup Time** | 5 minutes | 15-30 minutes |
-| **Use Case** | Development, testing | Production, enterprise |
+| Feature | Status | Details |
+|---------|--------|---------|
+| **LangGraph Workflow** | ✅ | Full state graph support |
+| **Bedrock Models** | ✅ | Claude, Titan, and more |
+| **Tool Integration** | ✅ | @create_tool decorator |
+| **Container Image** | ✅ | Optimized Dockerfile |
+| **Auto-scaling** | ✅ | Managed by AWS |
+| **Monitoring** | ✅ | CloudWatch integration |
+| **Security** | ✅ | IAM and VPC support |
+| **Deployment Script** | ✅ | One-command deploy |
 
-## 🎯 Quick Start Guide
+## 📊 Bedrock Models
 
-### For Development (Use GitHub Deployment)
+Your agent can use any of these Bedrock models:
 
-```bash
-# 1. Clone and install
-git clone https://github.com/JKevinXu/LangGraphAgentCore.git
-cd LangGraphAgentCore
-./install.sh
+### Claude Models (Recommended)
+- `anthropic.claude-3-sonnet-20240229-v1:0` - Balanced performance
+- `anthropic.claude-3-haiku-20240307-v1:0` - Fast and cost-effective
+- `anthropic.claude-3-opus-20240229-v1:0` - Most capable
 
-# 2. Set API key
-echo "OPENAI_API_KEY=sk-..." > .env
-
-# 3. Run example
-python example.py
-```
-
-### For Production (Use Bedrock Deployment)
-
-```bash
-# 1. Clone repository
-git clone https://github.com/JKevinXu/LangGraphAgentCore.git
-cd LangGraphAgentCore/bedrock
-
-# 2. Configure AWS
-aws configure
-
-# 3. Deploy to Bedrock
-./deploy.sh
-
-# 4. Invoke via AWS SDK (see bedrock/README.md)
-```
-
-## 📁 Complete Project Structure
-
-```
-LangGraphAgentCore/
-├── agentcore/              # Core package (~100 lines)
-│   ├── __init__.py
-│   ├── agent.py
-│   └── tools.py
-├── bedrock/                # AWS Bedrock deployment
-│   ├── agent_runtime.py
-│   ├── agent_bedrock.py
-│   ├── requirements.txt
-│   ├── Dockerfile
-│   ├── deploy.sh
-│   └── README.md
-├── example.py              # Usage example
-├── install.sh              # Quick install
-├── README.md               # Documentation
-├── DEPLOY.md               # This file
-├── requirements.txt        # Core dependencies
-└── LICENSE                 # MIT
-```
+### Amazon Titan Models
+- `amazon.titan-text-express-v1` - Fast general text
+- `amazon.titan-text-lite-v1` - Lightweight option
 
 ## 🔧 Configuration
 
-### GitHub Deployment (OpenAI)
-```env
-OPENAI_API_KEY=sk-...
+### Agent Configuration
+
+Edit `bedrock/agent_runtime.py`:
+
+```python
+config = AgentConfig(
+    model="anthropic.claude-3-sonnet-20240229-v1:0",
+    temperature=0.7,
+    max_iterations=10
+)
 ```
 
-### Bedrock Deployment (AWS)
-```env
+### Custom Tools
+
+Add your own tools:
+
+```python
+@create_tool
+def my_custom_tool(param: str) -> str:
+    """Description of what the tool does."""
+    # Your implementation
+    return result
+
+agent.add_tool(my_custom_tool)
+```
+
+### Environment Variables
+
+```bash
+# AWS Configuration
 AWS_REGION=us-east-1
 AWS_ACCOUNT_ID=123456789012
+
+# Agent Configuration  
 AGENT_MODEL_ID=anthropic.claude-3-sonnet-20240229-v1:0
+AGENT_TEMPERATURE=0.7
+AGENT_MAX_TOKENS=4096
 ```
 
-## 📈 Stats
+## 📈 Monitoring
 
-- **Total Commits:** 4
-- **Total Files:** 13
-- **Lines of Code:** ~800
-- **Core Package:** ~100 lines
-- **Dependencies:** 4 (core) + 3 (bedrock)
-- **Deployment Targets:** 2 (GitHub + AWS Bedrock)
+### CloudWatch Logs
 
-## 🎉 What's New in This Update
+View logs in AWS Console:
+```
+/aws/bedrock/agentcore/langgraph-agentcore
+```
 
-✨ **AWS Bedrock Agent Core Integration**
-- Full integration with AWS Bedrock Agent Core Runtime
-- Support for Claude and other Bedrock models
-- One-command deployment script
-- Docker containerization
-- Production-ready configuration
+### Metrics
 
-## 📚 Documentation
+Monitor:
+- Invocation count
+- Latency
+- Error rate
+- Token usage
+- Tool execution time
 
-- **Main README:** [README.md](README.md)
-- **Bedrock Deployment:** [bedrock/README.md](bedrock/README.md)
-- **Example Usage:** [example.py](example.py)
-- **AWS Bedrock Samples:** See `/Users/kx/ws/amazon-bedrock-agentcore-samples/`
+## 💰 Cost Optimization
 
-## 🌐 Resources
+1. **Use Haiku for simple tasks** - 10x cheaper than Opus
+2. **Set appropriate max_tokens** - Reduce waste
+3. **Cache frequently used data** - Reduce API calls
+4. **Monitor usage** - Set billing alerts
 
-- **GitHub Repository:** https://github.com/JKevinXu/LangGraphAgentCore
-- **LangGraph Docs:** https://langchain-ai.github.io/langgraph/
-- **AWS Bedrock:** https://aws.amazon.com/bedrock/
-- **Agent Core Runtime:** https://docs.aws.amazon.com/bedrock/
+## 🔍 Troubleshooting
 
-## 🚦 Deployment Status
+### "Model not available"
+**Solution:** Enable model access in AWS Bedrock console
 
-| Component | Status | URL/Location |
-|-----------|--------|--------------|
-| **Source Code** | ✅ Deployed | https://github.com/JKevinXu/LangGraphAgentCore |
-| **GitHub Pages** | ❌ Not configured | - |
-| **PyPI Package** | ❌ Not published | - |
-| **AWS Bedrock** | 🟡 Ready to deploy | Run `bedrock/deploy.sh` |
-| **Docker Hub** | ❌ Not published | - |
+### "Permission denied"
+**Solution:** Check IAM roles have Bedrock permissions:
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "bedrock:InvokeModel",
+    "bedrock:InvokeModelWithResponseStream"
+  ],
+  "Resource": "*"
+}
+```
 
-## 🎯 Next Steps
+### "Docker build fails"
+**Solution:** Ensure you're in the `LangGraphAgentCore` root directory when running deploy
 
-### Immediate
-- ✅ GitHub deployment complete
-- ✅ Bedrock integration added
-- ⚪ Test Bedrock deployment
+### "ECR push fails"
+**Solution:** Verify ECR permissions and re-authenticate:
+```bash
+aws ecr get-login-password --region us-east-1 | \
+  docker login --username AWS --password-stdin $AWS_ACCOUNT.dkr.ecr.us-east-1.amazonaws.com
+```
 
-### Future Enhancements
-- 📦 Publish to PyPI
-- 🐳 Publish to Docker Hub
-- 📚 Add more examples
-- 🧪 Add unit tests
-- 📊 Add monitoring dashboard
+## 📚 Additional Resources
+
+- **Bedrock Agent Core Runtime Docs**: [AWS Documentation](https://docs.aws.amazon.com/bedrock/)
+- **LangGraph Guide**: [LangGraph Docs](https://langchain-ai.github.io/langgraph/)
+- **Sample Projects**: [Bedrock Agent Core Samples](https://github.com/awslabs/amazon-bedrock-agent-core-samples)
+
+## 🎉 Deployment Complete
+
+Once deployed, your agent is:
+- ✅ Running on AWS managed infrastructure
+- ✅ Auto-scaling based on demand
+- ✅ Monitored via CloudWatch
+- ✅ Secured with IAM
+- ✅ Ready for production use
+
+## 📞 Support
+
+- **Issues**: https://github.com/JKevinXu/LangGraphAgentCore/issues
+- **Docs**: See [bedrock/README.md](bedrock/README.md)
+- **AWS Support**: Contact through AWS Console
 
 ---
 
 **Last Updated:** 2025-11-14  
 **Version:** 0.1.0  
-**Repository:** https://github.com/JKevinXu/LangGraphAgentCore
+**Deployment Target:** AWS Bedrock Agent Core Runtime
