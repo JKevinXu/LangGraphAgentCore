@@ -32,10 +32,9 @@ fi
 
 echo "✅ Prerequisites check passed"
 
-# Install dependencies
+# Install dependencies (skipped - will be installed in Docker)
 echo ""
-echo "📦 Installing dependencies..."
-pip install -r requirements.txt
+echo "📦 Dependencies will be installed in Docker container..."
 
 # Test agent locally (optional)
 read -p "Test agent locally first? (y/n) " -n 1 -r
