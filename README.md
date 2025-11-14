@@ -58,6 +58,17 @@ Run the example:
 python example.py
 ```
 
+## AWS Bedrock Deployment
+
+Deploy to AWS Bedrock Agent Core Runtime:
+
+```bash
+cd bedrock
+./deploy.sh
+```
+
+See [bedrock/README.md](bedrock/README.md) for details.
+
 ## License
 
 MIT
