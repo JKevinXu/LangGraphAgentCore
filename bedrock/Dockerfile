@@ -1,27 +1,37 @@
 FROM public.ecr.aws/docker/library/python:3.11-slim
-
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
-COPY bedrock/requirements.txt .
-COPY requirements.txt requirements-base.txt
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt requirements.txt
+# Install from requirements file
+RUN pip install -r requirements.txt
 
-# Copy application code
-COPY agentcore/ ./agentcore/
-COPY bedrock/agent_runtime.py .
-COPY bedrock/agent_bedrock.py .
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1
 
-# Run the agent
-CMD ["python", "agent_runtime.py"]
 
+RUN pip install aws-opentelemetry-distro>=0.10.0
+
+
+# Set AWS region environment variable
+
+ENV AWS_REGION=us-west-2
+ENV AWS_DEFAULT_REGION=us-west-2
+
+
+# Signal that this is running in Docker for host binding logic
+ENV DOCKER_CONTAINER=1
+
+# Create non-root user
+RUN useradd -m -u 1000 bedrock_agentcore
+USER bedrock_agentcore
+
+EXPOSE 8080
+EXPOSE 8000
+
+# Copy entire project (respecting .dockerignore)
+COPY . .
+
+# Use the full module path
+
+CMD ["opentelemetry-instrument", "python", "-m", "agent_runtime"]

@@ -9,3 +9,6 @@ langchain>=0.1.0
 langchain-core>=0.1.0
 python-dotenv>=1.0.0
 
+# AgentCore SDK
+bedrock-agentcore>=0.1.0
+

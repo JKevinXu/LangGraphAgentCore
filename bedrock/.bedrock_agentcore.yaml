@@ -1,0 +1,30 @@
+default_agent: langgraph_agent
+agents:
+  langgraph_agent:
+    name: langgraph_agent
+    entrypoint: /Users/kevinxu/ws9/LangGraphAgentCore/bedrock/agent_runtime.py
+    platform: linux/arm64
+    container_runtime: docker
+    aws:
+      execution_role: arn:aws:iam::313117444016:role/LangGraphAgentCoreRole
+      execution_role_auto_create: false
+      account: '313117444016'
+      region: us-west-2
+      ecr_repository: 313117444016.dkr.ecr.us-west-2.amazonaws.com/bedrock-agentcore-langgraph_agent
+      ecr_auto_create: false
+      network_configuration:
+        network_mode: PUBLIC
+      protocol_configuration:
+        server_protocol: HTTP
+      observability:
+        enabled: true
+    bedrock_agentcore:
+      agent_id: langgraph_agent-1NyH76Cfc7
+      agent_arn: arn:aws:bedrock-agentcore:us-west-2:313117444016:runtime/langgraph_agent-1NyH76Cfc7
+      agent_session_id: 52d6293a-d765-42ab-b37d-d2e075c2169c
+    codebuild:
+      project_name: null
+      execution_role: null
+      source_bucket: null
+    authorizer_configuration: null
+    oauth_configuration: null
