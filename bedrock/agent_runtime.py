@@ -12,6 +12,10 @@ from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage
 import math
 import operator
+import os
+
+# Enable LangSmith OpenTelemetry integration for LangGraph node-level tracing
+os.environ["LANGSMITH_OTEL_ENABLED"] = "true"
 
 # Initialize the Bedrock Agent Core App
 app = BedrockAgentCoreApp()

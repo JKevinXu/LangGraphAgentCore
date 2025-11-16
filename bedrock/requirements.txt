@@ -12,3 +12,7 @@ python-dotenv>=1.0.0
 # AgentCore SDK
 bedrock-agentcore>=0.1.0
 
+# LangGraph Node-Level Tracing
+langsmith[otel]>=0.4.0
+opentelemetry-instrumentation-langchain>=0.45.0
+
