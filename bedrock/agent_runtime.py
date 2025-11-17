@@ -7,6 +7,7 @@ This module enables deploying your LangGraph agents to AWS Bedrock Agent Core Ru
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from langgraph.graph import StateGraph, MessagesState
 from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph_checkpoint_aws import AgentCoreMemorySaver
 from langchain_aws import ChatBedrock
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -16,6 +17,10 @@ import os
 
 # Enable LangSmith OpenTelemetry integration for LangGraph node-level tracing
 os.environ["LANGSMITH_OTEL_ENABLED"] = "true"
+
+# Configuration
+REGION = os.environ.get("AWS_REGION", "us-west-2")
+MEMORY_ID = os.environ.get("AGENTCORE_MEMORY_ID", None)
 
 # Initialize the Bedrock Agent Core App
 app = BedrockAgentCoreApp()
@@ -76,7 +81,7 @@ def get_weather(location: str) -> str:
 
 # Create agent with Bedrock model
 def create_agent():
-    """Create and configure the LangGraph agent with Bedrock."""
+    """Create and configure the LangGraph agent with Bedrock and memory support."""
     
     # Initialize Bedrock LLM
     llm = ChatBedrock(
@@ -118,8 +123,22 @@ def create_agent():
     # Set entry point
     graph_builder.set_entry_point("chatbot")
     
-    # Compile the graph
-    return graph_builder.compile()
+    # Initialize checkpointer for short-term memory persistence
+    # Memory ID is optional - if not provided, memory features will be disabled
+    checkpointer = None
+    if MEMORY_ID:
+        try:
+            checkpointer = AgentCoreMemorySaver(MEMORY_ID, region_name=REGION)
+            print(f"✅ Short-term memory enabled with Memory ID: {MEMORY_ID}")
+        except Exception as e:
+            print(f"⚠️  Warning: Could not initialize memory checkpointer: {e}")
+            print("   Agent will run without memory persistence.")
+    else:
+        print("ℹ️  Memory ID not configured. Agent will run without memory persistence.")
+        print("   Set AGENTCORE_MEMORY_ID environment variable to enable memory.")
+    
+    # Compile the graph with checkpointer (if available)
+    return graph_builder.compile(checkpointer=checkpointer)
 
 
 # Initialize the agent
@@ -127,22 +146,50 @@ agent = create_agent()
 
 
 @app.entrypoint
-def invoke_agent(payload):
+def invoke_agent(payload, context=None):
     """
     Entrypoint for AWS Bedrock Agent Core Runtime.
     
     This function is called by the runtime when the agent is invoked.
     
     Args:
-        payload: Dictionary with 'prompt' key containing user message
+        payload: Dictionary with keys:
+            - 'prompt': User message (required)
+            - 'session_id': Session ID for conversation continuity (optional)
+            - 'actor_id': Actor ID for user/agent identification (optional)
+        context: AgentCore runtime context (optional, contains memory_id)
         
     Returns:
         Agent's response string
     """
     user_input = payload.get("prompt", "")
+    session_id = payload.get("session_id", "default-session")
+    actor_id = payload.get("actor_id", "default-actor")
     
-    # Invoke the agent with LangGraph
-    response = agent.invoke({"messages": [HumanMessage(content=user_input)]})
+    # Get memory ID from context if available (AgentCore passes it here)
+    memory_id = MEMORY_ID  # First try environment variable
+    if context and hasattr(context, 'memory_id'):
+        memory_id = context.memory_id
+        print(f"✅ Using memory from context: {memory_id}")
+    
+    # Prepare the input
+    input_data = {"messages": [HumanMessage(content=user_input)]}
+    
+    # If memory is enabled, pass configuration with thread_id and actor_id
+    if memory_id:
+        config = {
+            "configurable": {
+                "thread_id": session_id,  # Maps to Bedrock AgentCore session_id
+                "actor_id": actor_id,      # Maps to Bedrock AgentCore actor_id
+            }
+        }
+        print(f"🔗 Using memory: {memory_id} for session: {session_id}")
+        # Invoke with memory configuration
+        response = agent.invoke(input_data, config=config)
+    else:
+        print("ℹ️  No memory configured, running without persistence")
+        # Invoke without memory configuration
+        response = agent.invoke(input_data)
     
     # Extract the final message content
     return response["messages"][-1].content

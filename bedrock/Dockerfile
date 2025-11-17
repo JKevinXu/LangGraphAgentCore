@@ -18,6 +18,9 @@ RUN pip install aws-opentelemetry-distro>=0.10.0
 ENV AWS_REGION=us-west-2
 ENV AWS_DEFAULT_REGION=us-west-2
 
+# Set AgentCore Memory ID for conversation persistence
+ENV AGENTCORE_MEMORY_ID=langgraph_agent_mem-o5nDQxAbkB
+
 
 # Signal that this is running in Docker for host binding logic
 ENV DOCKER_CONTAINER=1

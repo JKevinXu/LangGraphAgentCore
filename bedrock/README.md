@@ -108,14 +108,30 @@ Once deployed, invoke using AWS SDK:
 
 ```python
 import boto3
+import json
 
-client = boto3.client('bedrock-agent-runtime')
+client = boto3.client('bedrock-agentcore', region_name='us-west-2')
 
-response = client.invoke_agent(
-    agentId='your-agent-id',
-    agentAliasId='your-alias-id',
-    sessionId='test-session',
-    inputText='What is the weather in Tokyo?'
+# Basic invocation
+payload = json.dumps({"prompt": "What is the weather in Tokyo?"})
+response = client.invoke_agent_runtime(
+    agentRuntimeArn='your-runtime-arn',
+    runtimeSessionId='session-123',
+    payload=payload,
+    qualifier='DEFAULT'
+)
+
+# With memory support
+payload = json.dumps({
+    "prompt": "What is the weather in Tokyo?",
+    "session_id": "session-123",
+    "actor_id": "user-alice"
+})
+response = client.invoke_agent_runtime(
+    agentRuntimeArn='your-runtime-arn',
+    runtimeSessionId='session-123',
+    payload=payload,
+    qualifier='DEFAULT'
 )
 ```
 
@@ -124,6 +140,7 @@ response = client.invoke_agent(
 ✅ **LangGraph Integration** - Full LangGraph workflow support
 ✅ **Bedrock Models** - Native support for Claude and other models
 ✅ **Tool Support** - Use custom tools with `@create_tool`
+✅ **Short-Term Memory** - Conversation persistence with AgentCore Memory
 ✅ **Runtime Compatibility** - Ready for Bedrock Agent Core Runtime
 ✅ **Observability** - Built-in logging and monitoring
 ✅ **Scalability** - Auto-scaling with AWS infrastructure
@@ -158,14 +175,37 @@ See AWS Bedrock Agent Core documentation for infrastructure-as-code examples.
 
 ```bash
 # AWS Configuration
-AWS_REGION=us-east-1
+AWS_REGION=us-west-2
 AWS_ACCOUNT_ID=123456789012
 
 # Agent Configuration
 AGENT_MODEL_ID=anthropic.claude-3-sonnet-20240229-v1:0
 AGENT_TEMPERATURE=0.7
 AGENT_MAX_TOKENS=4096
+
+# Memory Configuration (Optional)
+AGENTCORE_MEMORY_ID=your-memory-id-here  # Enable conversation persistence
 ```
+
+### Enabling Memory Support
+
+To enable short-term memory persistence:
+
+1. Create an AgentCore Memory:
+```bash
+aws bedrock-agentcore create-memory \
+  --region us-west-2 \
+  --memory-name "langgraph-agent-memory"
+```
+
+2. Set the Memory ID:
+```bash
+export AGENTCORE_MEMORY_ID="your-memory-id"
+```
+
+3. Deploy the agent (memory will be automatically enabled)
+
+See [../MEMORY_SUPPORT.md](../MEMORY_SUPPORT.md) for complete memory documentation.
 
 ## Monitoring & Observability
 

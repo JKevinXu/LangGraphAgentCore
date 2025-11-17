@@ -78,15 +78,47 @@ Once deployed to Bedrock Agent Core:
 
 ```python
 import boto3
+import json
 
-client = boto3.client('bedrock-agent-runtime')
-response = client.invoke_agent(
-    agentId='your-agent-id',
-    agentAliasId='your-alias-id',
-    sessionId='session-123',
-    inputText='What is the weather in Tokyo?'
+client = boto3.client('bedrock-agentcore', region_name='us-west-2')
+
+# Basic invocation
+payload = json.dumps({"prompt": "What is 15 * 23?"})
+response = client.invoke_agent_runtime(
+    agentRuntimeArn='your-runtime-arn',
+    runtimeSessionId='session-123',
+    payload=payload,
+    qualifier='DEFAULT'
+)
+
+# With memory support (conversation continuity)
+payload = json.dumps({
+    "prompt": "My name is Alice",
+    "session_id": "session-123",
+    "actor_id": "user-alice"
+})
+response = client.invoke_agent_runtime(
+    agentRuntimeArn='your-runtime-arn',
+    runtimeSessionId='session-123',
+    payload=payload,
+    qualifier='DEFAULT'
+)
+
+# Follow-up message (agent remembers context)
+payload = json.dumps({
+    "prompt": "What is my name?",
+    "session_id": "session-123",  # Same session
+    "actor_id": "user-alice"
+})
+response = client.invoke_agent_runtime(
+    agentRuntimeArn='your-runtime-arn',
+    runtimeSessionId='session-123',
+    payload=payload,
+    qualifier='DEFAULT'
 )
 ```
+
+See [MEMORY_SUPPORT.md](MEMORY_SUPPORT.md) for detailed memory configuration.
 
 ## Deployment
 
@@ -115,6 +147,7 @@ See [bedrock/README.md](bedrock/README.md) for complete deployment guide.
 - ✅ **LangGraph Integration** - Full workflow support
 - ✅ **Bedrock Models** - Claude, Titan, and more
 - ✅ **Tool Support** - Easy custom tool creation
+- ✅ **Short-Term Memory** - Conversation persistence with AgentCore Memory
 - ✅ **Production Ready** - Built for AWS infrastructure
 - ✅ **Auto-scaling** - Managed by AWS
 - ✅ **Observability** - CloudWatch integration
@@ -158,8 +191,9 @@ AGENT_TEMPERATURE=0.7
 ## Documentation
 
 - **Deployment Guide**: [bedrock/README.md](bedrock/README.md)
-- **Deployment Status**: [DEPLOY.md](DEPLOY.md)
-- **Example Usage**: [example.py](example.py)
+- **Memory Support**: [MEMORY_SUPPORT.md](MEMORY_SUPPORT.md) - Short-term memory persistence
+- **Node Tracing**: [LANGGRAPH_NODE_TRACING.md](LANGGRAPH_NODE_TRACING.md) - LangGraph observability
+- **Deployment Status**: [DEPLOYMENT_COMPLETE.md](DEPLOYMENT_COMPLETE.md)
 
 ## Resources
 
