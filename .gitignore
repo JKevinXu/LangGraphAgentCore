@@ -57,3 +57,4 @@ logs/
 .dmypy.json
 dmypy.json
 
+memory_id.txt
