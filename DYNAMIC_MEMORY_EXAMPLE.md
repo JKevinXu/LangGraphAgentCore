@@ -1,437 +1,167 @@
-# Dynamic Data in Memory Event Body - Complete Guide
+# Dynamic Data in Memory - Simple Guide
 
-Your agent now stores **custom dynamic data directly in the checkpoint body**! This means all your custom data persists across conversation turns and is available in the next invocation.
+Your agent now stores **custom data directly in the checkpoint body**! This means your custom data persists across conversation turns.
 
-## 🎯 What's Different?
+## 🎯 What This Means
 
-### Before: Only Metadata
-```json
-{
-  "metadata": {"user_preferences": "..."},  // Separate from state
-  "messages": [...]
-}
-```
-
-### After: Data in Checkpoint Body
+### Before: Only Messages
 ```json
 {
   "channel_values": {
-    "messages": [...],
-    "user_context": {...},           // ✅ Your data here!
-    "business_data": {...},          // ✅ Persisted!
-    "analytics_data": {...},         // ✅ Available next turn!
-    "conversation_metadata": {...}   // ✅ Part of state!
+    "messages": [...]  // Only conversation history
   }
 }
 ```
 
-## 📦 Available Fields in Memory Body
+### After: Messages + Your Custom Data
+```json
+{
+  "channel_values": {
+    "messages": [...],
+    "user_preferences": {...},  // ✅ Your data persists!
+    "custom_data": {...}         // ✅ Any custom fields!
+  }
+}
+```
 
-Your checkpoint now stores these custom fields:
+## 📦 Available Custom Fields
 
 | Field | Type | Purpose | Example |
 |-------|------|---------|---------|
-| `user_context` | dict | User profile, preferences, location | `{"user_id": "123", "preferences": {...}}` |
-| `conversation_metadata` | dict | Conversation-level data | `{"type": "support", "language": "en"}` |
-| `business_data` | dict | Custom business logic | `{"tenant_id": "acme", "subscription": "pro"}` |
-| `analytics_data` | dict | Tracking and metrics | `{"source": "mobile", "campaign": "summer"}` |
-| `session_summary` | str | Rolling conversation summary | `"User asking about pricing"` |
-| `last_updated` | str | ISO timestamp | `"2025-11-17T15:30:00"` |
+| `user_preferences` | dict | User preferences and settings | `{"language": "en", "theme": "dark"}` |
+| `custom_data` | dict | Any custom application data | `{"cart_id": "123", "session_start": "..."}` |
 
 ## 🚀 Usage Examples
 
-### Example 1: Basic Usage with User Preferences
+### Example 1: User Preferences
 
+**Turn 1: Set preferences**
 ```bash
 agentcore invoke '{
-  "prompt": "What is the weather?",
-  "session_id": "user-123-session",
-  "user_id": "user-123",
+  "prompt": "Hi! My name is Alice.",
+  "session_id": "user-123",
   "preferences": {
-    "temperature_unit": "celsius",
     "language": "en",
-    "notification_enabled": true
-  },
-  "location": "San Francisco"
-}'
-```
-
-**What gets stored:**
-```json
-{
-  "channel_values": {
-    "messages": [...],
-    "user_context": {
-      "user_id": "user-123",
-      "preferences": {
-        "temperature_unit": "celsius",
-        "language": "en",
-        "notification_enabled": true
-      },
-      "profile": {},
-      "location": "San Francisco"
-    },
-    "last_updated": "2025-11-17T15:30:00"
+    "temperature_unit": "celsius"
   }
-}
-```
-
-**Next turn - preferences are remembered:**
-```bash
-agentcore invoke '{
-  "prompt": "Show me the forecast",
-  "session_id": "user-123-session"
 }'
-# Agent automatically uses celsius (from user_context.preferences)
 ```
 
-### Example 2: E-commerce with Business Data
-
+**Turn 2: Preferences are remembered**
 ```bash
 agentcore invoke '{
-  "prompt": "I want to buy a laptop",
-  "session_id": "shopping-cart-456",
-  "user_id": "customer-789",
+  "prompt": "What's my preferred temperature unit?",
+  "session_id": "user-123"
+}'
+# Agent responds: "celsius" (from stored preferences)
+```
+
+### Example 2: Custom Application Data
+
+**Turn 1: Store custom data**
+```bash
+agentcore invoke '{
+  "prompt": "I want to order a pizza",
+  "session_id": "order-456",
   "preferences": {
-    "budget": 1500,
-    "preferred_brands": ["Apple", "Dell"]
+    "favorite_topping": "pepperoni"
   },
-  "profile": {
-    "name": "Alice",
-    "loyalty_tier": "gold",
-    "points": 5000
-  },
-  "business_data": {
-    "tenant_id": "retail-store-1",
-    "organization": "TechMart",
-    "custom_fields": {
-      "cart_id": "cart-123",
-      "promo_code": "SUMMER25",
-      "referral_source": "email_campaign"
-    }
+  "custom_data": {
+    "cart_id": "cart-789",
+    "order_type": "delivery",
+    "address": "123 Main St"
   }
 }'
 ```
 
-**Checkpoint stores:**
-```json
-{
-  "user_context": {
-    "user_id": "customer-789",
-    "preferences": {"budget": 1500, "preferred_brands": ["Apple", "Dell"]},
-    "profile": {"name": "Alice", "loyalty_tier": "gold", "points": 5000},
-    "location": "unknown"
-  },
-  "business_data": {
-    "tenant_id": "retail-store-1",
-    "organization": "TechMart",
-    "custom_fields": {
-      "cart_id": "cart-123",
-      "promo_code": "SUMMER25",
-      "referral_source": "email_campaign"
-    }
-  }
-}
-```
-
-**Agent behavior changes based on data:**
-- Uses `budget` to filter recommendations
-- Applies `promo_code` if eligible
-- Mentions `loyalty_tier` benefits
-- All data persists for multi-turn shopping experience
-
-### Example 3: Customer Support with Analytics
-
+**Turn 2: Data is available**
 ```bash
 agentcore invoke '{
-  "prompt": "I have an issue with my order",
-  "session_id": "support-ticket-789",
-  "user_id": "customer-456",
-  "conversation_type": "customer_support",
-  "channel": "chat_widget",
-  "profile": {
-    "account_type": "premium",
-    "order_history_count": 15
-  },
-  "business_data": {
-    "tenant_id": "company-xyz",
-    "custom_fields": {
-      "order_id": "ORD-12345",
-      "issue_type": "delivery_delay",
-      "priority": "high"
-    }
-  },
-  "analytics_data": {
-    "request_source": "web_app",
-    "user_agent": "Chrome/120.0",
-    "referrer": "order_tracking_page",
-    "campaign_id": "customer_retention_q4"
-  }
+  "prompt": "Add another pizza to my order",
+  "session_id": "order-456"
 }'
+# Agent knows the cart_id, order_type, and preferences!
 ```
 
-**Agent can:**
-- See it's a `customer_support` conversation
-- Know user is `premium` (provide better service)
-- Reference `order_id` from business_data
-- Track metrics via `analytics_data`
+## 🔍 How It Works
 
-### Example 4: Multi-Step Task with Session Summary
-
-```bash
-# Turn 1: Initial request
-agentcore invoke '{
-  "prompt": "I need to plan a vacation",
-  "session_id": "vacation-planning-001",
-  "user_id": "traveler-123",
-  "preferences": {
-    "budget": 3000,
-    "travel_dates": "2025-12-15 to 2025-12-22",
-    "interests": ["beach", "culture", "food"]
-  },
-  "session_summary": ""
-}'
-
-# Turn 2: Follow-up (summary auto-updated)
-agentcore invoke '{
-  "prompt": "What about hotels?",
-  "session_id": "vacation-planning-001",
-  "session_summary": "User planning vacation to Paris, budget $3000, dates Dec 15-22"
-}'
-
-# Turn 3: More context added
-agentcore invoke '{
-  "prompt": "Book the Marriott",
-  "session_id": "vacation-planning-001",
-  "session_summary": "User planning Paris trip. Looking at hotels. Interested in Marriott."
-}'
-```
-
-**State evolution:**
-```json
-// Turn 1
-{
-  "conversation_metadata": {
-    "message_count": 1,
-    "last_interaction": "2025-11-17T15:30:00"
-  },
-  "session_summary": "User planning vacation"
-}
-
-// Turn 2
-{
-  "conversation_metadata": {
-    "message_count": 3,
-    "last_interaction": "2025-11-17T15:32:00"
-  },
-  "session_summary": "User planning vacation to Paris, discussing hotels"
-}
-
-// Turn 3
-{
-  "conversation_metadata": {
-    "message_count": 5,
-    "last_interaction": "2025-11-17T15:35:00"
-  },
-  "analytics_data": {
-    "total_turns": 3
-  },
-  "session_summary": "User planning Paris trip. Looking at hotels. Booking Marriott."
-}
-```
-
-## 🎨 Advanced Use Cases
-
-### Use Case 1: A/B Testing
-
-```bash
-agentcore invoke '{
-  "prompt": "Show me products",
-  "session_id": "user-session",
-  "analytics_data": {
-    "experiment_id": "pricing_test_v2",
-    "variant": "B",
-    "cohort": "new_users"
-  }
-}'
-```
-
-Agent can adjust behavior based on `variant` and track results.
-
-### Use Case 2: Multi-Tenant SaaS
-
-```bash
-agentcore invoke '{
-  "prompt": "Create a report",
-  "session_id": "workspace-session",
-  "business_data": {
-    "tenant_id": "company-abc",
-    "organization": "ACME Corp",
-    "custom_fields": {
-      "workspace_id": "ws-789",
-      "role": "admin",
-      "permissions": ["read", "write", "delete"]
-    }
-  }
-}'
-```
-
-Agent respects tenant isolation and permission levels.
-
-### Use Case 3: Personalized Learning
-
-```bash
-agentcore invoke '{
-  "prompt": "Teach me Python",
-  "session_id": "learning-path-123",
-  "user_context": {
-    "profile": {
-      "skill_level": "beginner",
-      "learning_style": "visual",
-      "completed_lessons": ["intro", "variables"]
-    },
-    "preferences": {
-      "pace": "slow",
-      "examples": "practical"
-    }
-  },
-  "session_summary": "Student learning Python basics. Completed intro and variables."
-}'
-```
-
-Agent adapts teaching style based on learner profile.
-
-## 🔍 Accessing Data in Your Agent
-
-The chatbot function can access all custom data:
+### In Your Agent Code
 
 ```python
+class CustomAgentState(TypedDict):
+    messages: Annotated[list, add_messages]
+    user_preferences: dict      # Persists across turns
+    custom_data: dict           # Persists across turns
+
 def chatbot(state: CustomAgentState):
-    # Access custom data
-    user_context = state.get("user_context", {})
-    business_data = state.get("business_data", {})
-    analytics_data = state.get("analytics_data", {})
+    # Access persisted data
+    user_prefs = state.get("user_preferences", {})
+    custom = state.get("custom_data", {})
     
     # Use it to customize behavior
-    if user_context.get("preferences", {}).get("temperature_unit") == "celsius":
-        # Use celsius in weather responses
+    if user_prefs:
+        # Include preferences in system message
         pass
     
-    if business_data.get("custom_fields", {}).get("priority") == "high":
-        # Provide priority service
-        pass
-    
-    # Update data for next turn
-    return {
-        "messages": [response],
-        "analytics_data": {
-            **analytics_data,
-            "total_turns": analytics_data.get("total_turns", 0) + 1
-        }
-    }
+    return {"messages": [response]}
 ```
 
-## 📊 What Gets Stored in Checkpoint
+### What Gets Stored
 
 **Full checkpoint structure:**
 ```json
 {
-  "checkpoint_id": "checkpoint-uuid",
+  "checkpoint_id": "...",
   "channel_values": {
     "messages": [
-      {"type": "HumanMessage", "content": "..."},
-      {"type": "AIMessage", "content": "..."}
+      {"type": "HumanMessage", "content": "Hi! My name is Alice."},
+      {"type": "AIMessage", "content": "Hello Alice!"}
     ],
-    "user_context": {
-      "user_id": "user-123",
-      "preferences": {"temperature_unit": "celsius"},
-      "profile": {"name": "Alice", "tier": "gold"},
-      "location": "San Francisco"
-    },
-    "conversation_metadata": {
-      "session_start": "2025-11-17T15:00:00",
-      "conversation_type": "general",
-      "channel": "api",
+    "user_preferences": {
       "language": "en",
-      "last_interaction": "2025-11-17T15:30:00",
-      "message_count": 5
+      "temperature_unit": "celsius"
     },
-    "business_data": {
-      "tenant_id": "company-abc",
-      "organization": "ACME Corp",
-      "custom_fields": {"cart_id": "cart-123"}
-    },
-    "analytics_data": {
-      "request_source": "mobile_app",
-      "user_agent": "iOS/16.0",
-      "referrer": "home_screen",
-      "campaign_id": "summer_2025",
-      "total_turns": 3,
-      "last_model_used": "claude-3-5-sonnet"
-    },
-    "session_summary": "User shopping for laptops, discussed MacBook Pro",
-    "last_updated": "2025-11-17T15:30:00"
-  },
-  "channel_versions": {...},
-  "pending_writes": []
+    "custom_data": {
+      "cart_id": "cart-789",
+      "order_type": "delivery"
+    }
+  }
 }
 ```
 
-## ✅ Benefits
+## ✅ Key Benefits
 
-1. **Rich Context** - Agent has full user context every turn
-2. **Business Logic** - Store tenant, org, custom business data
-3. **Analytics** - Track user journey and behavior
-4. **Personalization** - Adapt to user preferences automatically
-5. **State Management** - Complex multi-turn workflows
-6. **Debugging** - Full visibility into conversation state
-7. **Compliance** - Track data lineage and consent
+1. **Persistent Context** - Data survives across conversation turns
+2. **Simple API** - Just pass `preferences` or `custom_data` in payload
+3. **Automatic Merging** - New data merges with existing state
+4. **Type Safe** - TypedDict ensures correct structure
+5. **No Overwriting** - Fields only update when explicitly provided
 
-## 🚀 Deploy & Test
+## 🚀 Quick Start
 
 ```bash
-# Deploy updated agent
-cd /Users/kx/ws/LangGraphAgentCore/bedrock
-source ../.venv/bin/activate
-agentcore launch
-
-# Test with custom data
+# Turn 1: Set data
 agentcore invoke '{
   "prompt": "Hello",
   "session_id": "test-session",
-  "user_id": "alice",
-  "preferences": {"theme": "dark", "language": "en"},
-  "profile": {"name": "Alice", "role": "admin"},
-  "business_data": {"tenant_id": "acme"},
-  "analytics_data": {"source": "web"}
+  "preferences": {"theme": "dark", "lang": "en"}
 }'
 
-# Check next turn - data is remembered!
+# Turn 2: Data is remembered (no need to resend!)
 agentcore invoke '{
-  "prompt": "What are my preferences?",
+  "prompt": "What are my settings?",
   "session_id": "test-session"
 }'
 ```
 
 ## 💡 Best Practices
 
-1. **Start Simple** - Begin with `user_context`, add more as needed
-2. **Keep Data Structured** - Use consistent schemas
-3. **Update Incrementally** - Only update fields that changed
-4. **Size Limits** - Keep total checkpoint under 256KB
-5. **Privacy** - Don't store sensitive data (PII, passwords)
-6. **Schema Evolution** - Plan for data structure changes
+1. **Use session_id** - Same session_id = same memory
+2. **Only send what changes** - Don't resend unchanged data
+3. **Keep data small** - Checkpoint size limit is 256KB
+4. **Use meaningful keys** - Makes debugging easier
+5. **Don't store secrets** - Memory is not encrypted
 
-## 🎉 Summary
+## 🎉 That's It!
 
-Your agent now stores **everything** in the memory event body:
-- ✅ User context and preferences
-- ✅ Business and organizational data  
-- ✅ Analytics and tracking info
-- ✅ Conversation metadata
-- ✅ Session summaries
-
-**All data persists across turns and is available in the next invocation!**
-
-This enables truly stateful, context-aware AI agents that remember not just conversations, but your entire business context. 🚀
-
+Your agent now has persistent custom data storage. Just add `preferences` or `custom_data` to your payload, and it'll be available in all future turns of the same session!

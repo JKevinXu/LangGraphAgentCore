@@ -38,12 +38,8 @@ class CustomAgentState(TypedDict):
     messages: Annotated[list, add_messages]
     
     # Custom dynamic data stored in checkpoint body
-    user_context: dict          # User profile, preferences, history
-    conversation_metadata: dict # Conversation-level data
-    business_data: dict         # Custom business logic data
-    analytics_data: dict        # Tracking and analytics
-    session_summary: str        # Rolling summary of conversation
-    last_updated: str           # Timestamp of last update
+    user_preferences: dict      # User preferences and settings
+    custom_data: dict           # Any custom application data
 
 
 # Define tools using LangChain's @tool decorator
@@ -123,42 +119,18 @@ def create_agent():
         if not messages or not isinstance(messages[0], SystemMessage):
             messages = [SystemMessage(content=system_message)] + messages
         
-        # Access custom dynamic data from state (these persist from previous turns!)
-        user_context = state.get("user_context", {})
-        conversation_metadata = state.get("conversation_metadata", {})
-        business_data = state.get("business_data", {})
+        # Access custom dynamic data from state (persists from previous turns!)
+        user_prefs = state.get("user_preferences", {})
         
-        # You can use this data to customize the agent's behavior
-        # For example, include user preferences in the system message
-        if user_context.get("preferences"):
-            prefs = user_context["preferences"]
-            custom_context = f"\nUser preferences: {prefs}"
+        # Use custom data to personalize the system message
+        if user_prefs:
+            custom_context = f"\nUser preferences: {user_prefs}"
             messages[0] = SystemMessage(content=system_message + custom_context)
         
         response = llm_with_tools.invoke(messages)
         
-        # Merge and update metadata (preserve existing fields)
-        updated_metadata = {
-            **conversation_metadata,  # Keep existing metadata
-            "last_interaction": datetime.now().isoformat(),
-            "message_count": len(messages) + 1,
-        }
-        
-        # Merge and update analytics (preserve existing fields)
-        updated_analytics = {
-            **state.get("analytics_data", {}),  # Keep existing analytics
-            "total_turns": state.get("analytics_data", {}).get("total_turns", 0) + 1,
-            "last_model_used": "claude-3-5-sonnet",
-        }
-        
-        # Return updated state - only update fields we want to change
-        # Fields not returned here (like user_context, business_data) are preserved automatically
-        return {
-            "messages": [response],
-            "conversation_metadata": updated_metadata,
-            "analytics_data": updated_analytics,
-            "last_updated": datetime.now().isoformat(),
-        }
+        # Return updated state - fields not returned are preserved automatically
+        return {"messages": [response]}
     
     # Create the graph with CustomAgentState
     graph_builder = StateGraph(CustomAgentState)
@@ -226,56 +198,18 @@ def invoke_agent(payload, context=None):
         memory_id = context.memory_id
         print(f"✅ Using memory from context: {memory_id}")
     
-    # Prepare the input - only include fields that are explicitly provided
+    # Prepare the input - only include custom fields if explicitly provided
     # This allows merging with existing state instead of overwriting
     input_data = {
         "messages": [HumanMessage(content=user_input)],
     }
     
-    # Only add custom data fields if they are explicitly provided in payload
-    # This preserves existing state instead of overwriting with defaults
-    if "user_id" in payload or "preferences" in payload or "profile" in payload or "location" in payload:
-        input_data["user_context"] = {}
-        if "user_id" in payload:
-            input_data["user_context"]["user_id"] = payload["user_id"]
-        if "preferences" in payload:
-            input_data["user_context"]["preferences"] = payload["preferences"]
-        if "profile" in payload:
-            input_data["user_context"]["profile"] = payload["profile"]
-        if "location" in payload:
-            input_data["user_context"]["location"] = payload["location"]
+    # Add custom data fields if provided in payload
+    if "preferences" in payload:
+        input_data["user_preferences"] = payload["preferences"]
     
-    if "conversation_type" in payload or "channel" in payload or "language" in payload:
-        input_data["conversation_metadata"] = {}
-        if "conversation_type" in payload:
-            input_data["conversation_metadata"]["conversation_type"] = payload["conversation_type"]
-        if "channel" in payload:
-            input_data["conversation_metadata"]["channel"] = payload["channel"]
-        if "language" in payload:
-            input_data["conversation_metadata"]["language"] = payload["language"]
-    
-    if "tenant_id" in payload or "organization" in payload or "custom_fields" in payload:
-        input_data["business_data"] = {}
-        if "tenant_id" in payload:
-            input_data["business_data"]["tenant_id"] = payload["tenant_id"]
-        if "organization" in payload:
-            input_data["business_data"]["organization"] = payload["organization"]
-        if "custom_fields" in payload:
-            input_data["business_data"]["custom_fields"] = payload["custom_fields"]
-    
-    if "source" in payload or "user_agent" in payload or "referrer" in payload or "campaign_id" in payload:
-        input_data["analytics_data"] = {}
-        if "source" in payload:
-            input_data["analytics_data"]["request_source"] = payload["source"]
-        if "user_agent" in payload:
-            input_data["analytics_data"]["user_agent"] = payload["user_agent"]
-        if "referrer" in payload:
-            input_data["analytics_data"]["referrer"] = payload["referrer"]
-        if "campaign_id" in payload:
-            input_data["analytics_data"]["campaign_id"] = payload["campaign_id"]
-    
-    if "session_summary" in payload:
-        input_data["session_summary"] = payload["session_summary"]
+    if "custom_data" in payload:
+        input_data["custom_data"] = payload["custom_data"]
     
     # If memory is enabled, pass configuration with thread_id and actor_id
     if memory_id:
@@ -291,7 +225,6 @@ def invoke_agent(payload, context=None):
             }
         }
         print(f"🔗 Using memory: {memory_id} for session: {session_id}")
-        print(f"📦 Dynamic data in checkpoint: user_context, business_data, analytics_data")
         # Invoke with memory configuration
         response = agent.invoke(input_data, config=config)
     else:
