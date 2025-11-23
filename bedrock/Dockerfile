@@ -7,6 +7,8 @@ COPY requirements.txt requirements.txt
 # Install from requirements file
 RUN pip install -r requirements.txt
 
+# Install Playwright browser binaries (for AgentCore Browser tool)
+RUN playwright install chromium --with-deps
 
 
 

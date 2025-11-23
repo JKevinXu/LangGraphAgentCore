@@ -16,6 +16,7 @@ from typing import Annotated, TypedDict
 import math
 import operator
 import os
+from browser_tool import get_browser_tool
 
 # Enable LangSmith OpenTelemetry integration for LangGraph node-level tracing
 os.environ["LANGSMITH_OTEL_ENABLED"] = "true"
@@ -105,12 +106,26 @@ def create_agent():
         model_kwargs={"temperature": 0.7}
     )
     
+    # Get browser tool (optional - gracefully degrades if unavailable)
+    browser_tool = get_browser_tool()
+    
     # Bind tools to the LLM
     tools = [calculator, get_weather]
+    if browser_tool:
+        tools.append(browser_tool)
+        print("✅ Browser tool enabled")
+    else:
+        print("ℹ️  Browser tool not available - agent will run with calculator and weather only")
+    
     llm_with_tools = llm.bind_tools(tools)
     
     # System message
-    system_message = "You're a helpful assistant. You can do simple math calculations and tell the weather."
+    system_message = """You're a helpful assistant with the following capabilities:
+- Perform mathematical calculations
+- Check weather information
+- Browse websites and extract information (when available)
+
+When browsing the web, navigate to URLs and extract the requested information accurately."""
     
     # Define the chatbot node with custom state handling
     def chatbot(state: CustomAgentState):
