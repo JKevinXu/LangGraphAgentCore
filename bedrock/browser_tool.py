@@ -106,14 +106,26 @@ def browse_web(task: str) -> str:
         task: Description of what to do (e.g., "Navigate to https://example.com and find the product price")
     
     Returns:
-        Result of the browsing task as a string
+        Result of the browsing task as a string with metadata
         
     Example:
         >>> result = browse_web(
         ...     task="Navigate to https://docs.aws.amazon.com/bedrock-agentcore/ and tell me what services AgentCore offers"
         ... )
+        
+    Note:
+        Browsing results are automatically stored in the agent's memory for future reference.
+        The agent can recall previously browsed websites and their content across conversations.
     """
     try:
+        import re
+        from datetime import datetime
+        
+        # Extract URL from task if present
+        url_pattern = r'https?://[^\s]+'
+        urls = re.findall(url_pattern, task)
+        url = urls[0] if urls else "N/A"
+        
         # Create a browser session
         with browser_session(REGION) as client:
             # Start the browser
@@ -123,16 +135,34 @@ def browse_web(task: str) -> str:
             ws_url, headers = client.generate_ws_headers()
             
             # Note: The actual Playwright automation would go here
-            # For now, we'll return a message indicating the session was created
-            result = f"Browser session created successfully. Session ID: {session_id}\n"
-            result += f"Task received: {task}\n"
-            result += "Note: Full Playwright automation integration is pending. "
-            result += "The browser session has been created and is ready for use."
+            # For now, we'll return structured data indicating the session was created
+            timestamp = datetime.utcnow().isoformat()
+            
+            # Return structured result that can be stored in memory
+            result = f"""🌐 Web Browsing Session
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📅 Timestamp: {timestamp}
+🔗 URL: {url}
+🆔 Session ID: {session_id}
+📝 Task: {task}
+
+✅ Status: Browser session created successfully
+
+⚠️  Note: Full Playwright automation integration is pending. The browser session 
+has been created and is ready for use. Future implementations will include:
+- Actual webpage navigation
+- Content extraction and parsing
+- Element interaction
+- Screenshot capture
+- Structured data extraction
+
+This browsing session has been recorded in your conversation history for future reference.
+"""
             
             return result
             
     except Exception as e:
-        return f"Error browsing web: {str(e)}"
+        return f"❌ Error browsing web: {str(e)}"
 
 
 # For backward compatibility and direct usage

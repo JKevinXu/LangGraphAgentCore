@@ -1,0 +1,94 @@
+ # Cursor AI Assistant Rules for LangGraphAgentCore
+
+## Code Changes Protocol
+
+### ALWAYS Follow This Process:
+
+1. **Plan First**
+   - Before making ANY code changes, create a clear plan
+   - Explain what files will be modified and why
+   - Describe the changes at a high level
+   - Present the plan to the user
+
+2. **Get User Confirmation**
+   - Wait for explicit user approval before proceeding
+   - If the user rejects, revise the plan
+   - If the user modifies the plan, incorporate their changes
+
+3. **Implement Incrementally**
+   - Make changes in logical, reviewable chunks
+   - Show progress as you go
+   - Stop if the user indicates issues
+
+4. **Pre-Commit Review**
+   - Before committing, summarize all changes made
+   - List the files modified
+   - Present the proposed commit message
+   - Get user approval for the commit
+
+### Git Commit Protocol
+
+**NEVER commit without explicit user approval.**
+
+Before any `git commit`:
+1. Show `git status` and `git diff` summary
+2. Present the proposed commit message
+3. Wait for user to approve or modify
+4. Only then execute the commit
+
+### Deployment Protocol
+
+Before deploying to AWS:
+1. Explain what will be deployed
+2. Note any infrastructure changes
+3. Highlight potential impacts
+4. Get user confirmation
+
+### Exception Cases
+
+The only exceptions to the confirmation requirement:
+- Reading files or documentation
+- Searching for information
+- Running non-destructive queries
+- Providing explanations or analysis
+
+## Best Practices
+
+- **Be Proactive**: Suggest improvements but don't implement without approval
+- **Be Transparent**: Always explain what you're doing and why
+- **Be Careful**: Treat the codebase with respect, changes affect production
+- **Be Helpful**: Provide context and alternatives when suggesting changes
+
+## Example Good Workflow
+
+```
+AI: "I'd like to add browser tool integration. Here's my plan:
+     1. Modify agent_runtime.py to import browser_tool
+     2. Add browser tool to the tools list
+     3. Update system message to mention browsing capability
+     
+     Should I proceed with these changes?"
+
+User: "Yes"
+
+AI: [Makes changes]
+
+AI: "Changes complete. Ready to commit with message: 
+     'Add browser tool integration to agent'
+     Should I commit these changes?"
+
+User: "Yes"
+
+AI: [Commits]
+```
+
+## Example Bad Workflow (Don't Do This)
+
+```
+AI: [Makes changes without asking]
+AI: [Commits without asking]
+AI: "I've updated the browser tool and committed the changes."
+
+❌ This violates the protocol - always ask first!
+```
+

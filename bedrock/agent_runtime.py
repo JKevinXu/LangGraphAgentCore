@@ -17,6 +17,7 @@ import math
 import operator
 import os
 from browser_tool import get_browser_tool
+from code_interpreter_tool import get_code_interpreter_tool
 
 # Enable LangSmith OpenTelemetry integration for LangGraph node-level tracing
 os.environ["LANGSMITH_OTEL_ENABLED"] = "true"
@@ -41,6 +42,8 @@ class CustomAgentState(TypedDict):
     # Custom dynamic data stored in checkpoint body
     user_preferences: dict      # User preferences and settings
     custom_data: dict           # Any custom application data
+    browsing_history: list      # Browser tool usage history with results
+    code_execution_history: list  # Code interpreter execution history
 
 
 # Define tools using LangChain's @tool decorator
@@ -109,13 +112,20 @@ def create_agent():
     # Get browser tool (optional - gracefully degrades if unavailable)
     browser_tool = get_browser_tool()
     
+    # Get code interpreter tool (optional - gracefully degrades if unavailable)
+    code_tool = get_code_interpreter_tool()
+    
     # Bind tools to the LLM
     tools = [calculator, get_weather]
     if browser_tool:
         tools.append(browser_tool)
         print("✅ Browser tool enabled")
-    else:
-        print("ℹ️  Browser tool not available - agent will run with calculator and weather only")
+    if code_tool:
+        tools.append(code_tool)
+        print("✅ Code Interpreter tool enabled")
+    
+    if not browser_tool and not code_tool:
+        print("ℹ️  Advanced tools not available - agent will run with calculator and weather only")
     
     llm_with_tools = llm.bind_tools(tools)
     
@@ -124,8 +134,10 @@ def create_agent():
 - Perform mathematical calculations
 - Check weather information
 - Browse websites and extract information (when available)
+- Execute Python code in a secure environment (when available)
 
-When browsing the web, navigate to URLs and extract the requested information accurately."""
+When browsing the web, navigate to URLs and extract the requested information accurately.
+When executing code, write clear, well-commented Python code and explain the results."""
     
     # Define the chatbot node with custom state handling
     def chatbot(state: CustomAgentState):
@@ -136,11 +148,32 @@ When browsing the web, navigate to URLs and extract the requested information ac
         
         # Access custom dynamic data from state (persists from previous turns!)
         user_prefs = state.get("user_preferences", {})
+        browsing_history = state.get("browsing_history", [])
+        code_execution_history = state.get("code_execution_history", [])
         
         # Use custom data to personalize the system message
+        context_additions = []
         if user_prefs:
-            custom_context = f"\nUser preferences: {user_prefs}"
-            messages[0] = SystemMessage(content=system_message + custom_context)
+            context_additions.append(f"\nUser preferences: {user_prefs}")
+        if browsing_history:
+            # Add recent browsing history to context (last 5 entries)
+            recent_history = browsing_history[-5:]
+            history_summary = "\n".join([
+                f"- {entry['timestamp']}: Browsed {entry.get('url', 'N/A')} - {entry.get('summary', 'N/A')}"
+                for entry in recent_history
+            ])
+            context_additions.append(f"\nRecent browsing history:\n{history_summary}")
+        if code_execution_history:
+            # Add recent code execution history to context (last 5 entries)
+            recent_code = code_execution_history[-5:]
+            code_summary = "\n".join([
+                f"- {entry['timestamp']}: Executed code - {entry.get('summary', 'N/A')}"
+                for entry in recent_code
+            ])
+            context_additions.append(f"\nRecent code executions:\n{code_summary}")
+        
+        if context_additions:
+            messages[0] = SystemMessage(content=system_message + "".join(context_additions))
         
         response = llm_with_tools.invoke(messages)
         
@@ -225,6 +258,12 @@ def invoke_agent(payload, context=None):
     
     if "custom_data" in payload:
         input_data["custom_data"] = payload["custom_data"]
+    
+    if "browsing_history" in payload:
+        input_data["browsing_history"] = payload["browsing_history"]
+    
+    if "code_execution_history" in payload:
+        input_data["code_execution_history"] = payload["code_execution_history"]
     
     # If memory is enabled, pass configuration with thread_id and actor_id
     if memory_id:
