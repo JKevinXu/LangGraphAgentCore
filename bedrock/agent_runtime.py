@@ -12,12 +12,15 @@ from langchain_aws import ChatBedrock
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage
 from datetime import datetime
-from typing import Annotated, TypedDict
+from typing import Annotated, TypedDict, AsyncIterator
 import math
 import operator
 import os
+import asyncio
 from browser_tool import get_browser_tool
 from code_interpreter_tool import get_code_interpreter_tool
+from streaming_utils import StreamEvent, StreamEventType, format_sse_event
+from callbacks import create_callbacks, MetricsCallback
 
 # Enable LangSmith OpenTelemetry integration for LangGraph node-level tracing
 os.environ["LANGSMITH_OTEL_ENABLED"] = "true"
@@ -288,6 +291,186 @@ def invoke_agent(payload, context=None):
     
     # Extract the final message content
     return response["messages"][-1].content
+
+
+async def stream_agent(payload, context=None) -> AsyncIterator[str]:
+    """
+    Streaming entrypoint for AWS Bedrock Agent Core Runtime.
+    
+    This function streams events as Server-Sent Events (SSE) format.
+    
+    Args:
+        payload: Dictionary with keys:
+            - 'prompt': User message (required)
+            - 'session_id': Session ID for conversation continuity (optional)
+            - 'actor_id': Actor ID for user/agent identification (optional)
+            - 'stream_tokens': Enable token-by-token streaming (optional, default: False)
+        context: AgentCore runtime context (optional, contains memory_id)
+        
+    Yields:
+        str: SSE-formatted events
+    """
+    user_input = payload.get("prompt", "")
+    session_id = payload.get("session_id", "default-session")
+    actor_id = payload.get("actor_id", "default-actor")
+    stream_tokens = payload.get("stream_tokens", False)
+    
+    # Get memory ID from context if available
+    memory_id = MEMORY_ID
+    if context and hasattr(context, 'memory_id'):
+        memory_id = context.memory_id
+    
+    # Prepare the input
+    input_data = {
+        "messages": [HumanMessage(content=user_input)],
+    }
+    
+    # Add custom data fields if provided in payload
+    if "preferences" in payload:
+        input_data["user_preferences"] = payload["preferences"]
+    
+    if "custom_data" in payload:
+        input_data["custom_data"] = payload["custom_data"]
+    
+    if "browsing_history" in payload:
+        input_data["browsing_history"] = payload["browsing_history"]
+    
+    if "code_execution_history" in payload:
+        input_data["code_execution_history"] = payload["code_execution_history"]
+    
+    # Set up event queue for callbacks
+    event_queue = asyncio.Queue()
+    
+    # Create callbacks
+    callbacks = create_callbacks(
+        enable_console=False,
+        enable_metrics=True,
+        event_queue=event_queue if stream_tokens else None
+    )
+    
+    # Build configuration
+    config = {
+        "metadata": {
+            "request_timestamp": datetime.now().isoformat(),
+            "request_source": payload.get("source", "api"),
+        }
+    }
+    
+    if memory_id:
+        config["configurable"] = {
+            "thread_id": session_id,
+            "actor_id": actor_id,
+        }
+    
+    if stream_tokens and callbacks:
+        config["callbacks"] = callbacks
+    
+    # Emit start event
+    yield format_sse_event(
+        StreamEventType.AGENT_START,
+        {
+            "session_id": session_id,
+            "actor_id": actor_id,
+            "timestamp": datetime.now().isoformat()
+        }
+    )
+    
+    try:
+        # Start async task to consume callback events
+        async def emit_callback_events():
+            """Consume events from callback queue."""
+            while True:
+                try:
+                    event = await asyncio.wait_for(event_queue.get(), timeout=0.1)
+                    yield event.to_sse()
+                except asyncio.TimeoutError:
+                    continue
+                except Exception:
+                    break
+        
+        # Stream events from LangGraph
+        step_count = 0
+        async for event in agent.astream(input_data, config=config, stream_mode="values"):
+            step_count += 1
+            
+            # Emit step event
+            if "messages" in event:
+                messages = event["messages"]
+                if messages:
+                    last_msg = messages[-1]
+                    
+                    # Emit agent step with message content
+                    yield format_sse_event(
+                        StreamEventType.AGENT_STEP,
+                        {
+                            "step": step_count,
+                            "node": "chatbot",
+                            "content": last_msg.content if hasattr(last_msg, 'content') else str(last_msg),
+                            "type": last_msg.type if hasattr(last_msg, 'type') else "unknown"
+                        }
+                    )
+            
+            # If token streaming is enabled, also emit from callback queue
+            if stream_tokens and not event_queue.empty():
+                try:
+                    callback_event = event_queue.get_nowait()
+                    yield callback_event.to_sse()
+                except asyncio.QueueEmpty:
+                    pass
+        
+        # Get final response
+        final_response = event.get("messages", [])[-1] if event and "messages" in event else None
+        final_content = final_response.content if final_response and hasattr(final_response, 'content') else ""
+        
+        # Get metrics if available
+        metrics = {}
+        for callback in callbacks:
+            if isinstance(callback, MetricsCallback):
+                metrics = callback.get_metrics()
+                break
+        
+        # Emit end event
+        yield format_sse_event(
+            StreamEventType.AGENT_END,
+            {
+                "output": final_content,
+                "steps": step_count,
+                "metrics": metrics,
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+        
+    except Exception as e:
+        # Emit error event
+        yield format_sse_event(
+            StreamEventType.ERROR,
+            {
+                "error": str(e),
+                "type": type(e).__name__,
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+
+
+@app.entrypoint
+def invoke_agent_streaming(payload, context=None):
+    """
+    Streaming entrypoint wrapper for sync compatibility.
+    
+    Args:
+        payload: Request payload with 'stream' flag
+        context: AgentCore runtime context
+        
+    Returns:
+        Response (streaming or blocking based on payload)
+    """
+    # Check if streaming is requested
+    if payload.get("stream", False):
+        # Return async generator for streaming
+        return stream_agent(payload, context)
+    else:
+        # Use regular blocking invoke
+        return invoke_agent(payload, context)
 
 
 if __name__ == "__main__":
