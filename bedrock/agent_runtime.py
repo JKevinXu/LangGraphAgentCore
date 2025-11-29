@@ -2,6 +2,7 @@
 AWS Bedrock Agent Core Runtime integration for LangGraphAgentCore.
 
 This module enables deploying your LangGraph agents to AWS Bedrock Agent Core Runtime.
+Supports streaming responses via SSE-formatted output.
 """
 
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
@@ -10,17 +11,15 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph_checkpoint_aws import AgentCoreMemorySaver
 from langchain_aws import ChatBedrock
 from langchain_core.tools import tool
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 from datetime import datetime
-from typing import Annotated, TypedDict, AsyncIterator
+from typing import Annotated, TypedDict
 import math
 import operator
 import os
-import asyncio
+import json
 from browser_tool import get_browser_tool
 from code_interpreter_tool import get_code_interpreter_tool
-from streaming_utils import StreamEvent, StreamEventType, format_sse_event
-from callbacks import create_callbacks, MetricsCallback
 
 # Enable LangSmith OpenTelemetry integration for LangGraph node-level tracing
 os.environ["LANGSMITH_OTEL_ENABLED"] = "true"
@@ -222,26 +221,114 @@ When executing code, write clear, well-commented Python code and explain the res
 agent = create_agent()
 
 
+def format_sse_event(event_type: str, data: dict) -> str:
+    """Format an event as SSE."""
+    return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+
+
+def stream_agent_with_events(agent, input_data: dict, config: dict = None) -> str:
+    """
+    Stream agent execution and collect events into SSE-formatted output.
+    
+    Uses LangGraph's stream() to get incremental updates and formats them
+    as Server-Sent Events for downstream parsing.
+    
+    Returns:
+        SSE-formatted string containing all events and final output
+    """
+    events = []
+    final_output = ""
+    
+    # Start event
+    events.append(format_sse_event("AGENT_START", {
+        "timestamp": datetime.now().isoformat(),
+        "session_id": config.get("configurable", {}).get("thread_id", "unknown") if config else "unknown"
+    }))
+    
+    try:
+        # Use stream() for incremental updates
+        stream_kwargs = {"input": input_data}
+        if config:
+            stream_kwargs["config"] = config
+        
+        for event in agent.stream(input_data, config=config, stream_mode="updates"):
+            timestamp = datetime.now().isoformat()
+            
+            # Process each node's output
+            for node_name, node_output in event.items():
+                if node_name == "chatbot":
+                    # LLM response from chatbot node
+                    messages = node_output.get("messages", [])
+                    for msg in messages:
+                        if isinstance(msg, AIMessage):
+                            # Check for tool calls
+                            if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                                for tool_call in msg.tool_calls:
+                                    events.append(format_sse_event("TOOL_CALL", {
+                                        "timestamp": timestamp,
+                                        "tool": tool_call.get("name", "unknown"),
+                                        "args": tool_call.get("args", {})
+                                    }))
+                            else:
+                                # Regular AI message - this is the response
+                                content = msg.content if hasattr(msg, 'content') else str(msg)
+                                final_output = content
+                                events.append(format_sse_event("LLM_RESPONSE", {
+                                    "timestamp": timestamp,
+                                    "content": content
+                                }))
+                                
+                elif node_name == "tools":
+                    # Tool execution results
+                    messages = node_output.get("messages", [])
+                    for msg in messages:
+                        if isinstance(msg, ToolMessage):
+                            events.append(format_sse_event("TOOL_RESULT", {
+                                "timestamp": timestamp,
+                                "tool": msg.name if hasattr(msg, 'name') else "unknown",
+                                "result": msg.content if hasattr(msg, 'content') else str(msg)
+                            }))
+        
+        # End event with final output
+        events.append(format_sse_event("AGENT_END", {
+            "timestamp": datetime.now().isoformat(),
+            "output": final_output
+        }))
+        
+    except Exception as e:
+        events.append(format_sse_event("ERROR", {
+            "timestamp": datetime.now().isoformat(),
+            "error": str(e)
+        }))
+        raise
+    
+    return "".join(events)
+
+
 @app.entrypoint
 def invoke_agent(payload, context=None):
     """
     Entrypoint for AWS Bedrock Agent Core Runtime.
     
     This function is called by the runtime when the agent is invoked.
+    Supports streaming mode via 'stream' parameter in payload.
     
     Args:
         payload: Dictionary with keys:
             - 'prompt': User message (required)
             - 'session_id': Session ID for conversation continuity (optional)
             - 'actor_id': Actor ID for user/agent identification (optional)
+            - 'stream': If True, returns SSE-formatted events (optional)
         context: AgentCore runtime context (optional, contains memory_id)
         
     Returns:
-        Agent's response string
+        If stream=True: SSE-formatted string with all events
+        If stream=False: Agent's final response string only
     """
     user_input = payload.get("prompt", "")
     session_id = payload.get("session_id", "default-session")
     actor_id = payload.get("actor_id", "default-actor")
+    use_streaming = payload.get("stream", False)
     
     # Get memory ID from context if available (AgentCore passes it here)
     memory_id = MEMORY_ID  # First try environment variable
@@ -268,7 +355,8 @@ def invoke_agent(payload, context=None):
     if "code_execution_history" in payload:
         input_data["code_execution_history"] = payload["code_execution_history"]
     
-    # If memory is enabled, pass configuration with thread_id and actor_id
+    # Build config
+    config = None
     if memory_id:
         config = {
             "configurable": {
@@ -282,195 +370,22 @@ def invoke_agent(payload, context=None):
             }
         }
         print(f"🔗 Using memory: {memory_id} for session: {session_id}")
-        # Invoke with memory configuration
-        response = agent.invoke(input_data, config=config)
     else:
         print("ℹ️  No memory configured, running without persistence")
-        # Invoke without memory configuration
+    
+    # Use streaming mode if requested
+    if use_streaming:
+        print("📡 Streaming mode enabled")
+        return stream_agent_with_events(agent, input_data, config)
+    
+    # Non-streaming mode (original behavior)
+    if config:
+        response = agent.invoke(input_data, config=config)
+    else:
         response = agent.invoke(input_data)
     
     # Extract the final message content
     return response["messages"][-1].content
-
-
-async def stream_agent(payload, context=None) -> AsyncIterator[str]:
-    """
-    Streaming entrypoint for AWS Bedrock Agent Core Runtime.
-    
-    This function streams events as Server-Sent Events (SSE) format.
-    
-    Args:
-        payload: Dictionary with keys:
-            - 'prompt': User message (required)
-            - 'session_id': Session ID for conversation continuity (optional)
-            - 'actor_id': Actor ID for user/agent identification (optional)
-            - 'stream_tokens': Enable token-by-token streaming (optional, default: False)
-        context: AgentCore runtime context (optional, contains memory_id)
-        
-    Yields:
-        str: SSE-formatted events
-    """
-    user_input = payload.get("prompt", "")
-    session_id = payload.get("session_id", "default-session")
-    actor_id = payload.get("actor_id", "default-actor")
-    stream_tokens = payload.get("stream_tokens", False)
-    
-    # Get memory ID from context if available
-    memory_id = MEMORY_ID
-    if context and hasattr(context, 'memory_id'):
-        memory_id = context.memory_id
-    
-    # Prepare the input
-    input_data = {
-        "messages": [HumanMessage(content=user_input)],
-    }
-    
-    # Add custom data fields if provided in payload
-    if "preferences" in payload:
-        input_data["user_preferences"] = payload["preferences"]
-    
-    if "custom_data" in payload:
-        input_data["custom_data"] = payload["custom_data"]
-    
-    if "browsing_history" in payload:
-        input_data["browsing_history"] = payload["browsing_history"]
-    
-    if "code_execution_history" in payload:
-        input_data["code_execution_history"] = payload["code_execution_history"]
-    
-    # Set up event queue for callbacks
-    event_queue = asyncio.Queue()
-    
-    # Create callbacks
-    callbacks = create_callbacks(
-        enable_console=False,
-        enable_metrics=True,
-        event_queue=event_queue if stream_tokens else None
-    )
-    
-    # Build configuration
-    config = {
-        "metadata": {
-            "request_timestamp": datetime.now().isoformat(),
-            "request_source": payload.get("source", "api"),
-        }
-    }
-    
-    if memory_id:
-        config["configurable"] = {
-            "thread_id": session_id,
-            "actor_id": actor_id,
-        }
-    
-    if stream_tokens and callbacks:
-        config["callbacks"] = callbacks
-    
-    # Emit start event
-    yield format_sse_event(
-        StreamEventType.AGENT_START,
-        {
-            "session_id": session_id,
-            "actor_id": actor_id,
-            "timestamp": datetime.now().isoformat()
-        }
-    )
-    
-    try:
-        # Start async task to consume callback events
-        async def emit_callback_events():
-            """Consume events from callback queue."""
-            while True:
-                try:
-                    event = await asyncio.wait_for(event_queue.get(), timeout=0.1)
-                    yield event.to_sse()
-                except asyncio.TimeoutError:
-                    continue
-                except Exception:
-                    break
-        
-        # Stream events from LangGraph
-        step_count = 0
-        async for event in agent.astream(input_data, config=config, stream_mode="values"):
-            step_count += 1
-            
-            # Emit step event
-            if "messages" in event:
-                messages = event["messages"]
-                if messages:
-                    last_msg = messages[-1]
-                    
-                    # Emit agent step with message content
-                    yield format_sse_event(
-                        StreamEventType.AGENT_STEP,
-                        {
-                            "step": step_count,
-                            "node": "chatbot",
-                            "content": last_msg.content if hasattr(last_msg, 'content') else str(last_msg),
-                            "type": last_msg.type if hasattr(last_msg, 'type') else "unknown"
-                        }
-                    )
-            
-            # If token streaming is enabled, also emit from callback queue
-            if stream_tokens and not event_queue.empty():
-                try:
-                    callback_event = event_queue.get_nowait()
-                    yield callback_event.to_sse()
-                except asyncio.QueueEmpty:
-                    pass
-        
-        # Get final response
-        final_response = event.get("messages", [])[-1] if event and "messages" in event else None
-        final_content = final_response.content if final_response and hasattr(final_response, 'content') else ""
-        
-        # Get metrics if available
-        metrics = {}
-        for callback in callbacks:
-            if isinstance(callback, MetricsCallback):
-                metrics = callback.get_metrics()
-                break
-        
-        # Emit end event
-        yield format_sse_event(
-            StreamEventType.AGENT_END,
-            {
-                "output": final_content,
-                "steps": step_count,
-                "metrics": metrics,
-                "timestamp": datetime.now().isoformat()
-            }
-        )
-        
-    except Exception as e:
-        # Emit error event
-        yield format_sse_event(
-            StreamEventType.ERROR,
-            {
-                "error": str(e),
-                "type": type(e).__name__,
-                "timestamp": datetime.now().isoformat()
-            }
-        )
-
-
-@app.entrypoint
-def invoke_agent_streaming(payload, context=None):
-    """
-    Streaming entrypoint wrapper for sync compatibility.
-    
-    Args:
-        payload: Request payload with 'stream' flag
-        context: AgentCore runtime context
-        
-    Returns:
-        Response (streaming or blocking based on payload)
-    """
-    # Check if streaming is requested
-    if payload.get("stream", False):
-        # Return async generator for streaming
-        return stream_agent(payload, context)
-    else:
-        # Use regular blocking invoke
-        return invoke_agent(payload, context)
 
 
 if __name__ == "__main__":
