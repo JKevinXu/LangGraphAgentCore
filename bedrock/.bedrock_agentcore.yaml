@@ -30,7 +30,7 @@ agents:
     bedrock_agentcore:
       agent_id: langgraph_agent-1NyH76Cfc7
       agent_arn: arn:aws:bedrock-agentcore:us-west-2:313117444016:runtime/langgraph_agent-1NyH76Cfc7
-      agent_session_id: e69837c1-1549-4f6f-b5ce-8406bbb5f404
+      agent_session_id: 30e8c087-229e-488e-b4f8-ebea01b99d25
     codebuild:
       project_name: bedrock-agentcore-langgraph_agent-builder
       execution_role: arn:aws:iam::313117444016:role/AmazonBedrockAgentCoreSDKCodeBuild-us-west-2-cc650878d6
@@ -43,6 +43,9 @@ agents:
       event_expiry_days: 30
       first_invoke_memory_check_done: true
       was_created_by_toolkit: true
+    identity:
+      credential_providers: []
+      workload: null
     authorizer_configuration: null
     request_header_configuration: null
     oauth_configuration: null
