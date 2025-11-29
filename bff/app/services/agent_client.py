@@ -1,12 +1,13 @@
 """
 Agent Client - Proxy to AWS Bedrock AgentCore
 
-This client forwards requests to the deployed agent and parses
-SSE-formatted streaming responses for re-emission to frontends.
+This client forwards requests to the deployed agent with true streaming support.
+Parses the agent runtime's wrapped SSE format and re-emits events to the frontend.
 """
 import boto3
 import json
 import logging
+import asyncio
 import re
 from typing import AsyncIterator
 from app.config import settings
@@ -14,80 +15,65 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
-def parse_sse_events(raw_response: str) -> list:
+def parse_agent_runtime_events(raw_response: str) -> list:
     """
-    Parse SSE-formatted response into a list of events.
+    Parse the agent runtime's wrapped SSE format.
     
-    Args:
-        raw_response: Raw SSE string from agent runtime
-        
-    Returns:
-        List of dicts with 'event' and 'data' keys
+    The agent runtime returns events like:
+    data: "event: AGENT_START\ndata: {...}\n\n"
+    data: "event: TOOL_CALL\ndata: {...}\n\n"
+    ...
+    
+    Returns list of (event_type, event_data) tuples.
     """
     events = []
     
-    # Handle JSON-encoded string (double-encoded)
-    content = raw_response.strip()
-    try:
-        decoded = json.loads(content)
-        if isinstance(decoded, str):
-            content = decoded
-    except json.JSONDecodeError:
-        pass
+    # Split by "data: " prefix (each chunk is a JSON-escaped SSE event)
+    chunks = raw_response.split('\ndata: ')
     
-    # Split by double newlines to get individual events
-    event_strings = re.split(r'\n\n+', content)
-    
-    for event_str in event_strings:
-        if not event_str.strip():
+    for chunk in chunks:
+        chunk = chunk.strip()
+        if not chunk:
             continue
+            
+        # Remove leading "data: " if present (for first chunk)
+        if chunk.startswith('data: '):
+            chunk = chunk[6:]
         
-        event_type = None
-        event_data = None
-        
-        for line in event_str.strip().split('\n'):
-            line = line.strip()
-            if line.startswith('event:'):
-                event_type = line[6:].strip()
-            elif line.startswith('data:'):
-                data_str = line[5:].strip()
-                try:
-                    event_data = json.loads(data_str)
-                except json.JSONDecodeError:
-                    event_data = {"raw": data_str}
-        
-        if event_type and event_data:
-            events.append({"event": event_type, "data": event_data})
+        # Parse the JSON-escaped string
+        try:
+            # The chunk should be a JSON string like "event: ...\ndata: ...\n\n"
+            if chunk.startswith('"') and chunk.endswith('"'):
+                inner = json.loads(chunk)
+            else:
+                inner = chunk
+            
+            # Now parse the inner SSE event
+            event_type = None
+            event_data = None
+            
+            for line in inner.split('\n'):
+                line = line.strip()
+                if line.startswith('event:'):
+                    event_type = line[6:].strip()
+                elif line.startswith('data:'):
+                    try:
+                        event_data = json.loads(line[5:].strip())
+                    except json.JSONDecodeError:
+                        event_data = {"raw": line[5:].strip()}
+            
+            if event_type and event_data:
+                events.append((event_type, event_data))
+                
+        except (json.JSONDecodeError, Exception) as e:
+            logger.warning(f"Failed to parse chunk: {chunk[:100]}... - {e}")
+            continue
     
     return events
 
 
-def extract_final_output(events: list) -> str:
-    """
-    Extract the final output from a list of SSE events.
-    
-    Args:
-        events: List of parsed SSE events
-        
-    Returns:
-        Final output string
-    """
-    final_output = ""
-    
-    for event in events:
-        event_type = event.get("event", "")
-        data = event.get("data", {})
-        
-        if event_type == "AGENT_END":
-            final_output = data.get("output", "")
-        elif event_type == "LLM_RESPONSE" and not final_output:
-            final_output = data.get("content", "")
-    
-    return final_output
-
-
 class AgentClient:
-    """Client for forwarding requests to AWS Bedrock AgentCore."""
+    """Client for forwarding requests to AWS Bedrock AgentCore with streaming."""
     
     def __init__(self):
         self.client = boto3.client(
@@ -97,24 +83,6 @@ class AgentClient:
         self.runtime_arn = settings.AGENT_RUNTIME_ARN
         logger.info(f"AgentClient initialized for: {self.runtime_arn}")
     
-    def _read_response_body(self, response: dict) -> str:
-        """Extract raw response string from Bedrock AgentCore response."""
-        streaming_body = response.get("response")
-        if streaming_body and hasattr(streaming_body, "read"):
-            result = streaming_body.read()
-            if isinstance(result, bytes):
-                return result.decode("utf-8")
-            return result
-        
-        body = response.get("body")
-        if body and hasattr(body, "read"):
-            result = body.read()
-            if isinstance(result, bytes):
-                return result.decode("utf-8")
-            return result
-        
-        return str(response)
-    
     async def invoke(
         self,
         prompt: str,
@@ -122,21 +90,12 @@ class AgentClient:
         actor_id: str = "default"
     ) -> str:
         """
-        Forward request to Bedrock AgentCore (blocking, non-streaming).
-        
-        Args:
-            prompt: User message
-            session_id: Session identifier
-            actor_id: Actor identifier
-            
-        Returns:
-            Agent response string
+        Forward request to Bedrock AgentCore (blocking).
         """
         payload = json.dumps({
             "prompt": prompt,
             "session_id": session_id,
-            "actor_id": actor_id,
-            "stream": False
+            "actor_id": actor_id
         })
         
         logger.info(f"Invoking agent: session={session_id}, prompt={prompt[:50]}...")
@@ -149,7 +108,14 @@ class AgentClient:
                 qualifier="DEFAULT"
             )
             
-            result = self._read_response_body(response)
+            streaming_body = response.get("response")
+            if streaming_body and hasattr(streaming_body, "read"):
+                result = streaming_body.read()
+                if isinstance(result, bytes):
+                    result = result.decode("utf-8")
+            else:
+                result = str(response)
+            
             logger.info(f"Agent response: {result[:100]}...")
             return result
             
@@ -166,16 +132,8 @@ class AgentClient:
         """
         Forward request to Bedrock AgentCore with streaming.
         
-        Parses SSE events from agent runtime and re-emits them
-        to the frontend with proper event types.
-        
-        Args:
-            prompt: User message
-            session_id: Session identifier
-            actor_id: Actor identifier
-            
-        Yields:
-            SSE-formatted event strings for frontend consumption
+        Parses the agent runtime's wrapped SSE format and re-emits
+        events in standard SSE format for the frontend.
         """
         payload = json.dumps({
             "prompt": prompt,
@@ -186,79 +144,70 @@ class AgentClient:
         
         logger.info(f"Streaming invoke: session={session_id}")
         
-        # Emit start event immediately
+        # Start event
         yield f"event: start\ndata: {json.dumps({'session_id': session_id})}\n\n"
         
         try:
-            response = self.client.invoke_agent_runtime(
-                agentRuntimeArn=self.runtime_arn,
-                runtimeSessionId=session_id,
-                payload=payload,
-                qualifier="DEFAULT"
+            # Call boto3 synchronously (it doesn't support async)
+            response = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self.client.invoke_agent_runtime(
+                    agentRuntimeArn=self.runtime_arn,
+                    runtimeSessionId=session_id,
+                    payload=payload,
+                    qualifier="DEFAULT"
+                )
             )
             
-            # Read the complete SSE-formatted response from agent runtime
-            raw_result = self._read_response_body(response)
-            logger.debug(f"Raw streaming response (first 500 chars): {raw_result[:500]}...")
+            streaming_body = response.get("response")
             
-            # Parse SSE events from agent runtime
-            events = parse_sse_events(raw_result)
-            logger.info(f"Parsed {len(events)} events from agent runtime")
-            
-            # Re-emit events to frontend
-            # Track last content to avoid duplicates
-            last_content = None
-            
-            for event in events:
-                event_type = event.get("event", "")
-                data = event.get("data", {})
+            if streaming_body:
+                # Read the full response
+                raw_data = streaming_body.read()
+                if isinstance(raw_data, bytes):
+                    raw_data = raw_data.decode("utf-8")
                 
-                # Map agent runtime events to frontend events
-                if event_type == "AGENT_START":
-                    yield f"event: agent_start\ndata: {json.dumps(data)}\n\n"
+                logger.info(f"Raw response length: {len(raw_data)}")
+                
+                # Parse the wrapped SSE events
+                events = parse_agent_runtime_events(raw_data)
+                logger.info(f"Parsed {len(events)} events")
+                
+                # Track last content to avoid duplicates
+                last_content = ""
+                
+                # Re-emit events with frontend-friendly names
+                for event_type, event_data in events:
+                    logger.info(f"Emitting event: {event_type}")
                     
-                elif event_type == "TOOL_CALL":
-                    yield f"event: tool_start\ndata: {json.dumps(data)}\n\n"
+                    if event_type == "AGENT_START":
+                        yield f"event: agent_start\ndata: {json.dumps(event_data)}\n\n"
+                    elif event_type == "TOOL_CALL":
+                        yield f"event: tool_start\ndata: {json.dumps({'tool': event_data.get('tool', 'unknown'), 'args': event_data.get('args', {})})}\n\n"
+                    elif event_type == "TOOL_RESULT":
+                        yield f"event: tool_end\ndata: {json.dumps({'tool': event_data.get('tool', 'unknown'), 'result': event_data.get('result', '')})}\n\n"
+                    elif event_type == "LLM_RESPONSE":
+                        content = event_data.get("content", "")
+                        if content and content != last_content:
+                            yield f"event: message\ndata: {json.dumps({'content': content, 'partial': True})}\n\n"
+                            last_content = content
+                    elif event_type == "AGENT_END":
+                        output = event_data.get("output", "")
+                        # Only emit if different from last LLM_RESPONSE
+                        if output and output != last_content:
+                            yield f"event: message\ndata: {json.dumps({'content': output, 'final': True})}\n\n"
+                    elif event_type == "ERROR":
+                        yield f"event: error\ndata: {json.dumps(event_data)}\n\n"
                     
-                elif event_type == "TOOL_RESULT":
-                    yield f"event: tool_end\ndata: {json.dumps(data)}\n\n"
-                    
-                elif event_type == "LLM_RESPONSE":
-                    # This is the main response content
-                    content = data.get("content", "")
-                    if content:
-                        last_content = content
-                        yield f"event: message\ndata: {json.dumps({'content': content})}\n\n"
-                    
-                elif event_type == "AGENT_END":
-                    # Final output - only emit if different from last content
-                    output = data.get("output", "")
-                    if output and output != last_content:
-                        yield f"event: message\ndata: {json.dumps({'content': output})}\n\n"
-                    
-                elif event_type == "ERROR":
-                    error_msg = data.get("error", "Unknown error")
-                    yield f"event: error\ndata: {json.dumps({'error': error_msg})}\n\n"
+                    # Small delay between events for visual effect
+                    await asyncio.sleep(0.05)
             
-            # If no events were parsed, treat raw response as plain text
-            if not events:
-                logger.warning("No SSE events parsed, returning raw response")
-                # Try to extract content from raw response
-                content = raw_result.strip()
-                # Handle JSON-encoded strings
-                try:
-                    decoded = json.loads(content)
-                    if isinstance(decoded, str):
-                        content = decoded
-                except json.JSONDecodeError:
-                    pass
-                yield f"event: message\ndata: {json.dumps({'content': content})}\n\n"
-            
-            # Done event
             yield f"event: done\ndata: {json.dumps({'status': 'complete'})}\n\n"
             
         except Exception as e:
             logger.error(f"Streaming error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
 
 
