@@ -68,11 +68,12 @@ class BffStack(Stack):
             container_insights=True
         )
 
-        # Docker image from local Dockerfile
+        # Docker image from local Dockerfile (build for AMD64)
         docker_image = ecr_assets.DockerImageAsset(
             self, "BffImage",
             directory="../",
-            file="Dockerfile"
+            file="Dockerfile",
+            platform=ecr_assets.Platform.LINUX_AMD64  # ECS Fargate default
         )
 
         # Task Role for Bedrock access

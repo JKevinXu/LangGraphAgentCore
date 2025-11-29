@@ -1,0 +1,25 @@
+# CDK
+cdk/
+cdk.out/
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+
+# Git
+.git/
+.gitignore
+
+# Tests
+tests/
+
+# Docs
+*.md
+

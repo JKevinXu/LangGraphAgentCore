@@ -1,0 +1,38 @@
+{
+  "version": "48.0.0",
+  "files": {
+    "119ec6da449db975b409c960dab87801001c690539383bb70150753d3a9b043d": {
+      "displayName": "LangGraphBffStack Template",
+      "source": {
+        "path": "LangGraphBffStack.template.json",
+        "packaging": "file"
+      },
+      "destinations": {
+        "current_account-us-west-2-cf9b73c0": {
+          "bucketName": "cdk-hnb659fds-assets-${AWS::AccountId}-us-west-2",
+          "objectKey": "119ec6da449db975b409c960dab87801001c690539383bb70150753d3a9b043d.json",
+          "region": "us-west-2",
+          "assumeRoleArn": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-hnb659fds-file-publishing-role-${AWS::AccountId}-us-west-2"
+        }
+      }
+    }
+  },
+  "dockerImages": {
+    "91fcbfc224842b59ea1dfed239e2b46e3055ab876666471a14a9bc667df820dc": {
+      "displayName": "BffImage",
+      "source": {
+        "directory": "asset.91fcbfc224842b59ea1dfed239e2b46e3055ab876666471a14a9bc667df820dc",
+        "dockerFile": "Dockerfile",
+        "platform": "linux/amd64"
+      },
+      "destinations": {
+        "current_account-us-west-2-e68fd3a0": {
+          "repositoryName": "cdk-hnb659fds-container-assets-${AWS::AccountId}-us-west-2",
+          "imageTag": "91fcbfc224842b59ea1dfed239e2b46e3055ab876666471a14a9bc667df820dc",
+          "region": "us-west-2",
+          "assumeRoleArn": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-hnb659fds-image-publishing-role-${AWS::AccountId}-us-west-2"
+        }
+      }
+    }
+  }
+}

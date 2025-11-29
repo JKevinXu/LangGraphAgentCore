@@ -1,0 +1,1130 @@
+{
+ "Resources": {
+  "BffVpc55E19F22": {
+   "Type": "AWS::EC2::VPC",
+   "Properties": {
+    "CidrBlock": "10.0.0.0/16",
+    "EnableDnsHostnames": true,
+    "EnableDnsSupport": true,
+    "InstanceTenancy": "default",
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "LangGraphBffStack/BffVpc"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffVpc/Resource"
+   }
+  },
+  "BffVpcPublicSubnet1Subnet473454AB": {
+   "Type": "AWS::EC2::Subnet",
+   "Properties": {
+    "AvailabilityZone": {
+     "Fn::Select": [
+      0,
+      {
+       "Fn::GetAZs": ""
+      }
+     ]
+    },
+    "CidrBlock": "10.0.0.0/24",
+    "MapPublicIpOnLaunch": true,
+    "Tags": [
+     {
+      "Key": "aws-cdk:subnet-name",
+      "Value": "Public"
+     },
+     {
+      "Key": "aws-cdk:subnet-type",
+      "Value": "Public"
+     },
+     {
+      "Key": "Name",
+      "Value": "LangGraphBffStack/BffVpc/PublicSubnet1"
+     }
+    ],
+    "VpcId": {
+     "Ref": "BffVpc55E19F22"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffVpc/PublicSubnet1/Subnet"
+   }
+  },
+  "BffVpcPublicSubnet1RouteTable0862EB69": {
+   "Type": "AWS::EC2::RouteTable",
+   "Properties": {
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "LangGraphBffStack/BffVpc/PublicSubnet1"
+     }
+    ],
+    "VpcId": {
+     "Ref": "BffVpc55E19F22"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffVpc/PublicSubnet1/RouteTable"
+   }
+  },
+  "BffVpcPublicSubnet1RouteTableAssociation11435676": {
+   "Type": "AWS::EC2::SubnetRouteTableAssociation",
+   "Properties": {
+    "RouteTableId": {
+     "Ref": "BffVpcPublicSubnet1RouteTable0862EB69"
+    },
+    "SubnetId": {
+     "Ref": "BffVpcPublicSubnet1Subnet473454AB"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffVpc/PublicSubnet1/RouteTableAssociation"
+   }
+  },
+  "BffVpcPublicSubnet1DefaultRoute66B6267D": {
+   "Type": "AWS::EC2::Route",
+   "Properties": {
+    "DestinationCidrBlock": "0.0.0.0/0",
+    "GatewayId": {
+     "Ref": "BffVpcIGWA80B89FD"
+    },
+    "RouteTableId": {
+     "Ref": "BffVpcPublicSubnet1RouteTable0862EB69"
+    }
+   },
+   "DependsOn": [
+    "BffVpcVPCGWF2070CBC"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffVpc/PublicSubnet1/DefaultRoute"
+   }
+  },
+  "BffVpcPublicSubnet1EIPE5E83B0E": {
+   "Type": "AWS::EC2::EIP",
+   "Properties": {
+    "Domain": "vpc",
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "LangGraphBffStack/BffVpc/PublicSubnet1"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffVpc/PublicSubnet1/EIP"
+   }
+  },
+  "BffVpcPublicSubnet1NATGateway03744A7F": {
+   "Type": "AWS::EC2::NatGateway",
+   "Properties": {
+    "AllocationId": {
+     "Fn::GetAtt": [
+      "BffVpcPublicSubnet1EIPE5E83B0E",
+      "AllocationId"
+     ]
+    },
+    "SubnetId": {
+     "Ref": "BffVpcPublicSubnet1Subnet473454AB"
+    },
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "LangGraphBffStack/BffVpc/PublicSubnet1"
+     }
+    ]
+   },
+   "DependsOn": [
+    "BffVpcPublicSubnet1DefaultRoute66B6267D",
+    "BffVpcPublicSubnet1RouteTableAssociation11435676"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffVpc/PublicSubnet1/NATGateway"
+   }
+  },
+  "BffVpcPublicSubnet2SubnetD4202330": {
+   "Type": "AWS::EC2::Subnet",
+   "Properties": {
+    "AvailabilityZone": {
+     "Fn::Select": [
+      1,
+      {
+       "Fn::GetAZs": ""
+      }
+     ]
+    },
+    "CidrBlock": "10.0.1.0/24",
+    "MapPublicIpOnLaunch": true,
+    "Tags": [
+     {
+      "Key": "aws-cdk:subnet-name",
+      "Value": "Public"
+     },
+     {
+      "Key": "aws-cdk:subnet-type",
+      "Value": "Public"
+     },
+     {
+      "Key": "Name",
+      "Value": "LangGraphBffStack/BffVpc/PublicSubnet2"
+     }
+    ],
+    "VpcId": {
+     "Ref": "BffVpc55E19F22"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffVpc/PublicSubnet2/Subnet"
+   }
+  },
+  "BffVpcPublicSubnet2RouteTableAAD1A33B": {
+   "Type": "AWS::EC2::RouteTable",
+   "Properties": {
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "LangGraphBffStack/BffVpc/PublicSubnet2"
+     }
+    ],
+    "VpcId": {
+     "Ref": "BffVpc55E19F22"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffVpc/PublicSubnet2/RouteTable"
+   }
+  },
+  "BffVpcPublicSubnet2RouteTableAssociationC6019D2F": {
+   "Type": "AWS::EC2::SubnetRouteTableAssociation",
+   "Properties": {
+    "RouteTableId": {
+     "Ref": "BffVpcPublicSubnet2RouteTableAAD1A33B"
+    },
+    "SubnetId": {
+     "Ref": "BffVpcPublicSubnet2SubnetD4202330"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffVpc/PublicSubnet2/RouteTableAssociation"
+   }
+  },
+  "BffVpcPublicSubnet2DefaultRoute177E69B5": {
+   "Type": "AWS::EC2::Route",
+   "Properties": {
+    "DestinationCidrBlock": "0.0.0.0/0",
+    "GatewayId": {
+     "Ref": "BffVpcIGWA80B89FD"
+    },
+    "RouteTableId": {
+     "Ref": "BffVpcPublicSubnet2RouteTableAAD1A33B"
+    }
+   },
+   "DependsOn": [
+    "BffVpcVPCGWF2070CBC"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffVpc/PublicSubnet2/DefaultRoute"
+   }
+  },
+  "BffVpcPrivateSubnet1SubnetFC9C7F73": {
+   "Type": "AWS::EC2::Subnet",
+   "Properties": {
+    "AvailabilityZone": {
+     "Fn::Select": [
+      0,
+      {
+       "Fn::GetAZs": ""
+      }
+     ]
+    },
+    "CidrBlock": "10.0.2.0/24",
+    "MapPublicIpOnLaunch": false,
+    "Tags": [
+     {
+      "Key": "aws-cdk:subnet-name",
+      "Value": "Private"
+     },
+     {
+      "Key": "aws-cdk:subnet-type",
+      "Value": "Private"
+     },
+     {
+      "Key": "Name",
+      "Value": "LangGraphBffStack/BffVpc/PrivateSubnet1"
+     }
+    ],
+    "VpcId": {
+     "Ref": "BffVpc55E19F22"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffVpc/PrivateSubnet1/Subnet"
+   }
+  },
+  "BffVpcPrivateSubnet1RouteTable97C77F5A": {
+   "Type": "AWS::EC2::RouteTable",
+   "Properties": {
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "LangGraphBffStack/BffVpc/PrivateSubnet1"
+     }
+    ],
+    "VpcId": {
+     "Ref": "BffVpc55E19F22"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffVpc/PrivateSubnet1/RouteTable"
+   }
+  },
+  "BffVpcPrivateSubnet1RouteTableAssociation9DA09A30": {
+   "Type": "AWS::EC2::SubnetRouteTableAssociation",
+   "Properties": {
+    "RouteTableId": {
+     "Ref": "BffVpcPrivateSubnet1RouteTable97C77F5A"
+    },
+    "SubnetId": {
+     "Ref": "BffVpcPrivateSubnet1SubnetFC9C7F73"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffVpc/PrivateSubnet1/RouteTableAssociation"
+   }
+  },
+  "BffVpcPrivateSubnet1DefaultRouteF30C60C1": {
+   "Type": "AWS::EC2::Route",
+   "Properties": {
+    "DestinationCidrBlock": "0.0.0.0/0",
+    "NatGatewayId": {
+     "Ref": "BffVpcPublicSubnet1NATGateway03744A7F"
+    },
+    "RouteTableId": {
+     "Ref": "BffVpcPrivateSubnet1RouteTable97C77F5A"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffVpc/PrivateSubnet1/DefaultRoute"
+   }
+  },
+  "BffVpcPrivateSubnet2Subnet9FA59C24": {
+   "Type": "AWS::EC2::Subnet",
+   "Properties": {
+    "AvailabilityZone": {
+     "Fn::Select": [
+      1,
+      {
+       "Fn::GetAZs": ""
+      }
+     ]
+    },
+    "CidrBlock": "10.0.3.0/24",
+    "MapPublicIpOnLaunch": false,
+    "Tags": [
+     {
+      "Key": "aws-cdk:subnet-name",
+      "Value": "Private"
+     },
+     {
+      "Key": "aws-cdk:subnet-type",
+      "Value": "Private"
+     },
+     {
+      "Key": "Name",
+      "Value": "LangGraphBffStack/BffVpc/PrivateSubnet2"
+     }
+    ],
+    "VpcId": {
+     "Ref": "BffVpc55E19F22"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffVpc/PrivateSubnet2/Subnet"
+   }
+  },
+  "BffVpcPrivateSubnet2RouteTable47C6827F": {
+   "Type": "AWS::EC2::RouteTable",
+   "Properties": {
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "LangGraphBffStack/BffVpc/PrivateSubnet2"
+     }
+    ],
+    "VpcId": {
+     "Ref": "BffVpc55E19F22"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffVpc/PrivateSubnet2/RouteTable"
+   }
+  },
+  "BffVpcPrivateSubnet2RouteTableAssociation55878F6D": {
+   "Type": "AWS::EC2::SubnetRouteTableAssociation",
+   "Properties": {
+    "RouteTableId": {
+     "Ref": "BffVpcPrivateSubnet2RouteTable47C6827F"
+    },
+    "SubnetId": {
+     "Ref": "BffVpcPrivateSubnet2Subnet9FA59C24"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffVpc/PrivateSubnet2/RouteTableAssociation"
+   }
+  },
+  "BffVpcPrivateSubnet2DefaultRoute730EB8D5": {
+   "Type": "AWS::EC2::Route",
+   "Properties": {
+    "DestinationCidrBlock": "0.0.0.0/0",
+    "NatGatewayId": {
+     "Ref": "BffVpcPublicSubnet1NATGateway03744A7F"
+    },
+    "RouteTableId": {
+     "Ref": "BffVpcPrivateSubnet2RouteTable47C6827F"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffVpc/PrivateSubnet2/DefaultRoute"
+   }
+  },
+  "BffVpcIGWA80B89FD": {
+   "Type": "AWS::EC2::InternetGateway",
+   "Properties": {
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "LangGraphBffStack/BffVpc"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffVpc/IGW"
+   }
+  },
+  "BffVpcVPCGWF2070CBC": {
+   "Type": "AWS::EC2::VPCGatewayAttachment",
+   "Properties": {
+    "InternetGatewayId": {
+     "Ref": "BffVpcIGWA80B89FD"
+    },
+    "VpcId": {
+     "Ref": "BffVpc55E19F22"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffVpc/VPCGW"
+   }
+  },
+  "ApiKeysSecret5A58C5CD": {
+   "Type": "AWS::SecretsManager::Secret",
+   "Properties": {
+    "Description": "API keys for BFF authentication (comma-separated)",
+    "GenerateSecretString": {},
+    "Name": "langgraph-bff/api-keys"
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete",
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/ApiKeysSecret/Resource"
+   }
+  },
+  "BffClusterF7F2B231": {
+   "Type": "AWS::ECS::Cluster",
+   "Properties": {
+    "ClusterName": "langgraph-bff-cluster",
+    "ClusterSettings": [
+     {
+      "Name": "containerInsights",
+      "Value": "enabled"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffCluster/Resource"
+   }
+  },
+  "BffTaskRoleD3367F4A": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "ecs-tasks.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffTaskRole/Resource"
+   }
+  },
+  "BffTaskRoleDefaultPolicy92229E7E": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "bedrock-agentcore:InvokeAgentRuntime",
+        "bedrock-agentcore:GetAgentRuntime"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        "arn:aws:bedrock-agentcore:us-west-2:313117444016:runtime/langgraph_agent-1NyH76Cfc7",
+        "arn:aws:bedrock-agentcore:us-west-2:313117444016:runtime/langgraph_agent-1NyH76Cfc7/*"
+       ]
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "BffTaskRoleDefaultPolicy92229E7E",
+    "Roles": [
+     {
+      "Ref": "BffTaskRoleD3367F4A"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffTaskRole/DefaultPolicy/Resource"
+   }
+  },
+  "BffLogGroup695C18F8": {
+   "Type": "AWS::Logs::LogGroup",
+   "Properties": {
+    "LogGroupName": "/aws/ecs/langgraph-bff",
+    "RetentionInDays": 14
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete",
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffLogGroup/Resource"
+   }
+  },
+  "BffServiceLB0975008C": {
+   "Type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
+   "Properties": {
+    "LoadBalancerAttributes": [
+     {
+      "Key": "deletion_protection.enabled",
+      "Value": "false"
+     }
+    ],
+    "Scheme": "internet-facing",
+    "SecurityGroups": [
+     {
+      "Fn::GetAtt": [
+       "BffServiceLBSecurityGroup521C3D28",
+       "GroupId"
+      ]
+     }
+    ],
+    "Subnets": [
+     {
+      "Ref": "BffVpcPublicSubnet1Subnet473454AB"
+     },
+     {
+      "Ref": "BffVpcPublicSubnet2SubnetD4202330"
+     }
+    ],
+    "Type": "application"
+   },
+   "DependsOn": [
+    "BffVpcPublicSubnet1DefaultRoute66B6267D",
+    "BffVpcPublicSubnet1RouteTableAssociation11435676",
+    "BffVpcPublicSubnet2DefaultRoute177E69B5",
+    "BffVpcPublicSubnet2RouteTableAssociationC6019D2F"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffService/LB/Resource"
+   }
+  },
+  "BffServiceLBSecurityGroup521C3D28": {
+   "Type": "AWS::EC2::SecurityGroup",
+   "Properties": {
+    "GroupDescription": "Automatically created Security Group for ELB LangGraphBffStackBffServiceLBB3CE310D",
+    "SecurityGroupIngress": [
+     {
+      "CidrIp": "0.0.0.0/0",
+      "Description": "Allow from anyone on port 80",
+      "FromPort": 80,
+      "IpProtocol": "tcp",
+      "ToPort": 80
+     }
+    ],
+    "VpcId": {
+     "Ref": "BffVpc55E19F22"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffService/LB/SecurityGroup/Resource"
+   }
+  },
+  "BffServiceLBSecurityGrouptoLangGraphBffStackBffServiceSecurityGroupEF15661880006A4174ED": {
+   "Type": "AWS::EC2::SecurityGroupEgress",
+   "Properties": {
+    "Description": "Load balancer to target",
+    "DestinationSecurityGroupId": {
+     "Fn::GetAtt": [
+      "BffServiceSecurityGroup25B21D32",
+      "GroupId"
+     ]
+    },
+    "FromPort": 8000,
+    "GroupId": {
+     "Fn::GetAtt": [
+      "BffServiceLBSecurityGroup521C3D28",
+      "GroupId"
+     ]
+    },
+    "IpProtocol": "tcp",
+    "ToPort": 8000
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffService/LB/SecurityGroup/to LangGraphBffStackBffServiceSecurityGroupEF156618:8000"
+   }
+  },
+  "BffServiceLBPublicListenerFC59CBFA": {
+   "Type": "AWS::ElasticLoadBalancingV2::Listener",
+   "Properties": {
+    "DefaultActions": [
+     {
+      "TargetGroupArn": {
+       "Ref": "BffServiceLBPublicListenerECSGroupF0AF143D"
+      },
+      "Type": "forward"
+     }
+    ],
+    "LoadBalancerArn": {
+     "Ref": "BffServiceLB0975008C"
+    },
+    "Port": 80,
+    "Protocol": "HTTP"
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffService/LB/PublicListener/Resource"
+   }
+  },
+  "BffServiceLBPublicListenerECSGroupF0AF143D": {
+   "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+   "Properties": {
+    "HealthCheckIntervalSeconds": 30,
+    "HealthCheckPath": "/health",
+    "HealthCheckTimeoutSeconds": 5,
+    "HealthyThresholdCount": 2,
+    "Port": 80,
+    "Protocol": "HTTP",
+    "TargetGroupAttributes": [
+     {
+      "Key": "stickiness.enabled",
+      "Value": "false"
+     }
+    ],
+    "TargetType": "ip",
+    "UnhealthyThresholdCount": 3,
+    "VpcId": {
+     "Ref": "BffVpc55E19F22"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffService/LB/PublicListener/ECSGroup/Resource"
+   }
+  },
+  "BffServiceTaskDefA78A7EFC": {
+   "Type": "AWS::ECS::TaskDefinition",
+   "Properties": {
+    "ContainerDefinitions": [
+     {
+      "Environment": [
+       {
+        "Name": "AWS_REGION",
+        "Value": "us-west-2"
+       },
+       {
+        "Name": "AGENT_RUNTIME_ARN",
+        "Value": "arn:aws:bedrock-agentcore:us-west-2:313117444016:runtime/langgraph_agent-1NyH76Cfc7"
+       },
+       {
+        "Name": "LOG_LEVEL",
+        "Value": "INFO"
+       }
+      ],
+      "Essential": true,
+      "Image": {
+       "Fn::Sub": "${AWS::AccountId}.dkr.ecr.us-west-2.${AWS::URLSuffix}/cdk-hnb659fds-container-assets-${AWS::AccountId}-us-west-2:91fcbfc224842b59ea1dfed239e2b46e3055ab876666471a14a9bc667df820dc"
+      },
+      "LogConfiguration": {
+       "LogDriver": "awslogs",
+       "Options": {
+        "awslogs-group": {
+         "Ref": "BffLogGroup695C18F8"
+        },
+        "awslogs-stream-prefix": "bff",
+        "awslogs-region": "us-west-2"
+       }
+      },
+      "Name": "bff",
+      "PortMappings": [
+       {
+        "ContainerPort": 8000,
+        "Protocol": "tcp"
+       }
+      ],
+      "Secrets": [
+       {
+        "Name": "API_KEYS",
+        "ValueFrom": {
+         "Ref": "ApiKeysSecret5A58C5CD"
+        }
+       }
+      ]
+     }
+    ],
+    "Cpu": "256",
+    "ExecutionRoleArn": {
+     "Fn::GetAtt": [
+      "BffServiceTaskDefExecutionRole057D19E8",
+      "Arn"
+     ]
+    },
+    "Family": "LangGraphBffStackBffServiceTaskDef2A970358",
+    "Memory": "512",
+    "NetworkMode": "awsvpc",
+    "RequiresCompatibilities": [
+     "FARGATE"
+    ],
+    "TaskRoleArn": {
+     "Fn::GetAtt": [
+      "BffTaskRoleD3367F4A",
+      "Arn"
+     ]
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffService/TaskDef/Resource"
+   }
+  },
+  "BffServiceTaskDefExecutionRole057D19E8": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "ecs-tasks.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffService/TaskDef/ExecutionRole/Resource"
+   }
+  },
+  "BffServiceTaskDefExecutionRoleDefaultPolicy90B65328": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:GetDownloadUrlForLayer",
+        "ecr:BatchGetImage"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":ecr:us-west-2:",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":repository/",
+          {
+           "Fn::Sub": "cdk-hnb659fds-container-assets-${AWS::AccountId}-us-west-2"
+          }
+         ]
+        ]
+       }
+      },
+      {
+       "Action": "ecr:GetAuthorizationToken",
+       "Effect": "Allow",
+       "Resource": "*"
+      },
+      {
+       "Action": [
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "BffLogGroup695C18F8",
+         "Arn"
+        ]
+       }
+      },
+      {
+       "Action": [
+        "secretsmanager:GetSecretValue",
+        "secretsmanager:DescribeSecret"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Ref": "ApiKeysSecret5A58C5CD"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "BffServiceTaskDefExecutionRoleDefaultPolicy90B65328",
+    "Roles": [
+     {
+      "Ref": "BffServiceTaskDefExecutionRole057D19E8"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffService/TaskDef/ExecutionRole/DefaultPolicy/Resource"
+   }
+  },
+  "BffServiceA085694E": {
+   "Type": "AWS::ECS::Service",
+   "Properties": {
+    "Cluster": {
+     "Ref": "BffClusterF7F2B231"
+    },
+    "DeploymentConfiguration": {
+     "Alarms": {
+      "AlarmNames": [],
+      "Enable": false,
+      "Rollback": false
+     },
+     "MaximumPercent": 200,
+     "MinimumHealthyPercent": 50
+    },
+    "DesiredCount": 2,
+    "EnableECSManagedTags": false,
+    "HealthCheckGracePeriodSeconds": 60,
+    "LaunchType": "FARGATE",
+    "LoadBalancers": [
+     {
+      "ContainerName": "bff",
+      "ContainerPort": 8000,
+      "TargetGroupArn": {
+       "Ref": "BffServiceLBPublicListenerECSGroupF0AF143D"
+      }
+     }
+    ],
+    "NetworkConfiguration": {
+     "AwsvpcConfiguration": {
+      "AssignPublicIp": "DISABLED",
+      "SecurityGroups": [
+       {
+        "Fn::GetAtt": [
+         "BffServiceSecurityGroup25B21D32",
+         "GroupId"
+        ]
+       }
+      ],
+      "Subnets": [
+       {
+        "Ref": "BffVpcPrivateSubnet1SubnetFC9C7F73"
+       },
+       {
+        "Ref": "BffVpcPrivateSubnet2Subnet9FA59C24"
+       }
+      ]
+     }
+    },
+    "ServiceName": "langgraph-bff-service",
+    "TaskDefinition": {
+     "Ref": "BffServiceTaskDefA78A7EFC"
+    }
+   },
+   "DependsOn": [
+    "BffServiceLBPublicListenerECSGroupF0AF143D",
+    "BffServiceLBPublicListenerFC59CBFA",
+    "BffTaskRoleDefaultPolicy92229E7E",
+    "BffTaskRoleD3367F4A"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffService/Service/Service"
+   }
+  },
+  "BffServiceSecurityGroup25B21D32": {
+   "Type": "AWS::EC2::SecurityGroup",
+   "Properties": {
+    "GroupDescription": "LangGraphBffStack/BffService/Service/SecurityGroup",
+    "SecurityGroupEgress": [
+     {
+      "CidrIp": "0.0.0.0/0",
+      "Description": "Allow all outbound traffic by default",
+      "IpProtocol": "-1"
+     }
+    ],
+    "VpcId": {
+     "Ref": "BffVpc55E19F22"
+    }
+   },
+   "DependsOn": [
+    "BffTaskRoleDefaultPolicy92229E7E",
+    "BffTaskRoleD3367F4A"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffService/Service/SecurityGroup/Resource"
+   }
+  },
+  "BffServiceSecurityGroupfromLangGraphBffStackBffServiceLBSecurityGroupC7DAFF9D80000A93113E": {
+   "Type": "AWS::EC2::SecurityGroupIngress",
+   "Properties": {
+    "Description": "Load balancer to target",
+    "FromPort": 8000,
+    "GroupId": {
+     "Fn::GetAtt": [
+      "BffServiceSecurityGroup25B21D32",
+      "GroupId"
+     ]
+    },
+    "IpProtocol": "tcp",
+    "SourceSecurityGroupId": {
+     "Fn::GetAtt": [
+      "BffServiceLBSecurityGroup521C3D28",
+      "GroupId"
+     ]
+    },
+    "ToPort": 8000
+   },
+   "DependsOn": [
+    "BffTaskRoleDefaultPolicy92229E7E",
+    "BffTaskRoleD3367F4A"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffService/Service/SecurityGroup/from LangGraphBffStackBffServiceLBSecurityGroupC7DAFF9D:8000"
+   }
+  },
+  "BffServiceTaskCountTargetF1473056": {
+   "Type": "AWS::ApplicationAutoScaling::ScalableTarget",
+   "Properties": {
+    "MaxCapacity": 10,
+    "MinCapacity": 2,
+    "ResourceId": {
+     "Fn::Join": [
+      "",
+      [
+       "service/",
+       {
+        "Ref": "BffClusterF7F2B231"
+       },
+       "/",
+       {
+        "Fn::GetAtt": [
+         "BffServiceA085694E",
+         "Name"
+        ]
+       }
+      ]
+     ]
+    },
+    "RoleARN": {
+     "Fn::Join": [
+      "",
+      [
+       "arn:",
+       {
+        "Ref": "AWS::Partition"
+       },
+       ":iam::",
+       {
+        "Ref": "AWS::AccountId"
+       },
+       ":role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService"
+      ]
+     ]
+    },
+    "ScalableDimension": "ecs:service:DesiredCount",
+    "ServiceNamespace": "ecs"
+   },
+   "DependsOn": [
+    "BffTaskRoleDefaultPolicy92229E7E",
+    "BffTaskRoleD3367F4A"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffService/Service/TaskCount/Target/Resource"
+   }
+  },
+  "BffServiceTaskCountTargetCpuScaling1AE0A888": {
+   "Type": "AWS::ApplicationAutoScaling::ScalingPolicy",
+   "Properties": {
+    "PolicyName": "LangGraphBffStackBffServiceTaskCountTargetCpuScalingBA828517",
+    "PolicyType": "TargetTrackingScaling",
+    "ScalingTargetId": {
+     "Ref": "BffServiceTaskCountTargetF1473056"
+    },
+    "TargetTrackingScalingPolicyConfiguration": {
+     "PredefinedMetricSpecification": {
+      "PredefinedMetricType": "ECSServiceAverageCPUUtilization"
+     },
+     "ScaleInCooldown": 60,
+     "ScaleOutCooldown": 60,
+     "TargetValue": 70
+    }
+   },
+   "DependsOn": [
+    "BffTaskRoleDefaultPolicy92229E7E",
+    "BffTaskRoleD3367F4A"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/BffService/Service/TaskCount/Target/CpuScaling/Resource"
+   }
+  },
+  "CDKMetadata": {
+   "Type": "AWS::CDK::Metadata",
+   "Properties": {
+    "Analytics": "v2:deflate64:H4sIAAAAAAAA/31T0W7bMAz8lr4rWpd8QZp2RYBiM+ygrwGtsK4WWzJEKUVg+N9HyXbsdsOedDod7eNRWsv15l7e38EHrdTpvKp1KbvCgzoLpo4dqrXsXlsldm/mNduJLJS1VkUoDfrIzSi3weMByhpnfua2RFZp8NqamziCp30Wl5/gn8HjB1xF5vSF4fzhvfHoGE+Cwcm423r2+t6g8aJAFZz212dnQ5s8/Jd4qhwS/UXvTeJ7QagcemrAQIWOQ0n7Uc+oF6hIdrs6EPuL/AR/gKsg9k3nR3zTRk9df2Ws8aANugU31hboLloNSY6wUFDHJONHdjaYZMAdgYhdykerzuj2DXvdRiaeyRxbS9pbd30AQqGhkV1uhwGlNbM8zJTogHpR24qberHVLbQJp36PLfg4DZLbtuWKNNAXC6cHNmcUnr74xxrIa1WzokwKbaoL36h/V7vhf4v9Uqc5XDNqJrw4P/Cf+ZJMthfbXsAsg+AtcZRshGd6yzSKU9qfmWE5OH4PXFAMdXNqn4i+FzmSDY77TjPgZ1TxaRT+Cr4NPLHs6t+t+baR3zdyc/ebtF45HqVuUObD+gd0pNSMkQMAAA=="
+   },
+   "Metadata": {
+    "aws:cdk:path": "LangGraphBffStack/CDKMetadata/Default"
+   }
+  }
+ },
+ "Outputs": {
+  "BffServiceLoadBalancerDNS65D065BD": {
+   "Value": {
+    "Fn::GetAtt": [
+     "BffServiceLB0975008C",
+     "DNSName"
+    ]
+   }
+  },
+  "BffServiceServiceURLADFF81DA": {
+   "Value": {
+    "Fn::Join": [
+     "",
+     [
+      "http://",
+      {
+       "Fn::GetAtt": [
+        "BffServiceLB0975008C",
+        "DNSName"
+       ]
+      }
+     ]
+    ]
+   }
+  },
+  "LoadBalancerDns": {
+   "Description": "ALB DNS name",
+   "Value": {
+    "Fn::GetAtt": [
+     "BffServiceLB0975008C",
+     "DNSName"
+    ]
+   }
+  },
+  "ServiceUrl": {
+   "Description": "BFF Service URL",
+   "Value": {
+    "Fn::Join": [
+     "",
+     [
+      "http://",
+      {
+       "Fn::GetAtt": [
+        "BffServiceLB0975008C",
+        "DNSName"
+       ]
+      }
+     ]
+    ]
+   }
+  },
+  "HealthEndpoint": {
+   "Description": "Health check endpoint",
+   "Value": {
+    "Fn::Join": [
+     "",
+     [
+      "http://",
+      {
+       "Fn::GetAtt": [
+        "BffServiceLB0975008C",
+        "DNSName"
+       ]
+      },
+      "/health"
+     ]
+    ]
+   }
+  },
+  "ChatEndpoint": {
+   "Description": "Chat API endpoint",
+   "Value": {
+    "Fn::Join": [
+     "",
+     [
+      "http://",
+      {
+       "Fn::GetAtt": [
+        "BffServiceLB0975008C",
+        "DNSName"
+       ]
+      },
+      "/v1/chat"
+     ]
+    ]
+   }
+  }
+ },
+ "Parameters": {
+  "BootstrapVersion": {
+   "Type": "AWS::SSM::Parameter::Value<String>",
+   "Default": "/cdk-bootstrap/hnb659fds/version",
+   "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]"
+  }
+ },
+ "Rules": {
+  "CheckBootstrapVersion": {
+   "Assertions": [
+    {
+     "Assert": {
+      "Fn::Not": [
+       {
+        "Fn::Contains": [
+         [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5"
+         ],
+         {
+          "Ref": "BootstrapVersion"
+         }
+        ]
+       }
+      ]
+     },
+     "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI."
+    }
+   ]
+  }
+ }
+}
