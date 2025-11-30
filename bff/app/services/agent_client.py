@@ -1,13 +1,10 @@
 """
 Agent Client - Bridge between BFF and AWS Bedrock AgentCore
 
-Uses queue-based producer-consumer pattern for streaming:
-- Producer: Invokes Bedrock AgentCore and pushes events to queue
-- Consumer: SSE Generator yields from queue
-
-Reference: https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/response-streaming.html
+Uses aioboto3 for TRUE async streaming without buffering.
+Queue-based producer-consumer pattern for SSE delivery.
 """
-import boto3
+import aioboto3
 import json
 import logging
 import asyncio
@@ -21,45 +18,37 @@ logger = logging.getLogger(__name__)
 @dataclass
 class StreamEvent:
     """Streaming event pushed to queue."""
-    event_type: str  # agent_start, tool_start, tool_end, message, error, done
+    event_type: str
     data: dict
 
 
 class StreamingCallbackHandler:
-    """
-    Queue-based handler for streaming events.
-    Producer pushes events, Consumer yields them.
-    """
+    """Queue-based handler for streaming events."""
     
     def __init__(self, session_id: str):
         self.session_id = session_id
         self.queue: asyncio.Queue[Optional[StreamEvent]] = asyncio.Queue()
     
     async def push_event(self, event_type: str, data: dict) -> None:
-        """Producer: Push event to queue."""
         await self.queue.put(StreamEvent(event_type=event_type, data=data))
     
-    async def get_event(self, timeout: float = 60.0) -> Optional[StreamEvent]:
-        """Consumer: Get event from queue with timeout."""
+    async def get_event(self, timeout: float = 120.0) -> Optional[StreamEvent]:
         try:
             return await asyncio.wait_for(self.queue.get(), timeout=timeout)
         except asyncio.TimeoutError:
             return None
     
     async def end_streaming(self) -> None:
-        """Signal completion with sentinel."""
         await self.queue.put(None)
 
 
 class AgentClient:
-    """Client for Bedrock AgentCore with queue-based streaming."""
+    """Client for Bedrock AgentCore with TRUE async streaming via aioboto3."""
     
     def __init__(self):
-        self.client = boto3.client(
-            "bedrock-agentcore",
-            region_name=settings.AWS_REGION
-        )
+        self.session = aioboto3.Session()
         self.runtime_arn = settings.AGENT_RUNTIME_ARN
+        self.region = settings.AWS_REGION
         logger.info(f"AgentClient initialized for: {self.runtime_arn}")
     
     async def invoke(
@@ -75,8 +64,8 @@ class AgentClient:
             "actor_id": actor_id
         })
         
-        try:
-            response = self.client.invoke_agent_runtime(
+        async with self.session.client("bedrock-agentcore", region_name=self.region) as client:
+            response = await client.invoke_agent_runtime(
                 agentRuntimeArn=self.runtime_arn,
                 runtimeSessionId=session_id,
                 payload=payload,
@@ -84,20 +73,14 @@ class AgentClient:
             )
             
             streaming_body = response.get("response")
-            if streaming_body and hasattr(streaming_body, "read"):
-                result = streaming_body.read()
+            if streaming_body:
+                result = await streaming_body.read()
                 if isinstance(result, bytes):
                     result = result.decode("utf-8")
-            else:
-                result = str(response)
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error invoking agent: {e}")
-            raise
+                return result
+            return str(response)
     
-    async def _process_bedrock_request(
+    async def _process_bedrock_stream(
         self,
         prompt: str,
         session_id: str,
@@ -105,10 +88,10 @@ class AgentClient:
         callback: StreamingCallbackHandler
     ) -> None:
         """
-        Producer: Invokes Bedrock AgentCore and pushes events to queue.
+        Producer: TRUE async streaming from Bedrock AgentCore.
         
-        This runs in a background task, iterating over the agent's
-        response and pushing each event to the queue immediately.
+        Uses aioboto3 for async iteration over the response stream.
+        Each line is pushed to the queue as soon as it arrives.
         """
         payload = json.dumps({
             "prompt": prompt,
@@ -118,103 +101,70 @@ class AgentClient:
         })
         
         try:
-            # Push start event
             await callback.push_event("agent_start", {
                 "session_id": session_id,
                 "status": "started"
             })
             
-            # Run boto3 call in thread (it's synchronous)
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: self.client.invoke_agent_runtime(
+            async with self.session.client("bedrock-agentcore", region_name=self.region) as client:
+                response = await client.invoke_agent_runtime(
                     agentRuntimeArn=self.runtime_arn,
                     runtimeSessionId=session_id,
                     payload=payload,
                     qualifier="DEFAULT"
                 )
-            )
-            
-            streaming_body = response.get("response")
-            
-            if streaming_body:
-                # Read and parse the response
-                raw_data = streaming_body.read()
-                if isinstance(raw_data, bytes):
-                    raw_data = raw_data.decode("utf-8")
                 
-                # Parse SSE events from agent runtime
-                events = self._parse_agent_events(raw_data)
+                streaming_body = response.get("response")
                 
-                # Push each event to queue with small delay for visual streaming
-                last_content = ""
-                for event_type, event_data in events:
-                    logger.info(f"Pushing event: {event_type}")
+                if streaming_body:
+                    buffer = ""
+                    last_content = ""
                     
-                    if event_type == "AGENT_START":
-                        # Already pushed above
-                        pass
-                    elif event_type == "TOOL_CALL":
-                        await callback.push_event("tool_start", {
-                            "tool": event_data.get("tool", "unknown"),
-                            "args": event_data.get("args", {})
-                        })
-                        await asyncio.sleep(0.1)  # Visual delay
-                    elif event_type == "TOOL_RESULT":
-                        await callback.push_event("tool_end", {
-                            "tool": event_data.get("tool", "unknown"),
-                            "result": event_data.get("result", "")
-                        })
-                        await asyncio.sleep(0.1)  # Visual delay
-                    elif event_type == "LLM_RESPONSE":
-                        content = event_data.get("content", "")
-                        if content and content != last_content:
-                            await callback.push_event("message", {
-                                "content": content,
-                                "partial": True
-                            })
-                            last_content = content
-                    elif event_type == "AGENT_END":
-                        output = event_data.get("output", "")
-                        if output and output != last_content:
-                            await callback.push_event("message", {
-                                "content": output,
-                                "final": True
-                            })
-                    elif event_type == "ERROR":
-                        await callback.push_event("error", event_data)
-            
+                    # TRUE ASYNC STREAMING: iterate over chunks as they arrive
+                    async for chunk in streaming_body.iter_chunks():
+                        if isinstance(chunk, tuple):
+                            chunk = chunk[0]  # aioboto3 returns (chunk, metadata)
+                        if isinstance(chunk, bytes):
+                            chunk = chunk.decode("utf-8")
+                        
+                        logger.info(f"Received chunk: {len(chunk)} bytes")
+                        buffer += chunk
+                        
+                        # Process complete SSE events
+                        while "\n\n" in buffer:
+                            event_str, buffer = buffer.split("\n\n", 1)
+                            await self._process_event(event_str, callback, last_content)
+                    
+                    # Process remaining buffer
+                    if buffer.strip():
+                        await self._process_event(buffer, callback, last_content)
+        
         except Exception as e:
             logger.error(f"Producer error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             await callback.push_event("error", {"error": str(e)})
         
         finally:
-            # Signal completion
             await callback.end_streaming()
     
-    def _parse_agent_events(self, raw_response: str) -> list:
-        """Parse agent runtime's wrapped SSE format."""
-        events = []
-        chunks = raw_response.split('\ndata: ')
+    async def _process_event(
+        self, 
+        event_str: str, 
+        callback: StreamingCallbackHandler,
+        last_content: str
+    ) -> str:
+        """Parse and push a single SSE event."""
+        if not event_str.strip():
+            return last_content
         
-        for chunk in chunks:
-            chunk = chunk.strip()
-            if not chunk:
-                continue
-            
-            if chunk.startswith('data: '):
-                chunk = chunk[6:]
-            
+        # Parse wrapped format: data: "event: ...\ndata: ...\n\n"
+        event_type = None
+        event_data = None
+        
+        if event_str.startswith('data: "'):
             try:
-                if chunk.startswith('"') and chunk.endswith('"'):
-                    inner = json.loads(chunk)
-                else:
-                    inner = chunk
-                
-                event_type = None
-                event_data = None
-                
+                inner = json.loads(event_str[6:])
                 for line in inner.split('\n'):
                     line = line.strip()
                     if line.startswith('event:'):
@@ -222,17 +172,53 @@ class AgentClient:
                     elif line.startswith('data:'):
                         try:
                             event_data = json.loads(line[5:].strip())
-                        except json.JSONDecodeError:
+                        except:
                             event_data = {"raw": line[5:].strip()}
-                
-                if event_type and event_data:
-                    events.append((event_type, event_data))
-                    
-            except Exception as e:
-                logger.warning(f"Failed to parse chunk: {e}")
-                continue
+            except:
+                pass
+        else:
+            for line in event_str.strip().split('\n'):
+                line = line.strip()
+                if line.startswith('event:'):
+                    event_type = line[6:].strip()
+                elif line.startswith('data:'):
+                    try:
+                        event_data = json.loads(line[5:].strip())
+                    except:
+                        event_data = {"raw": line[5:].strip()}
         
-        return events
+        if event_type and event_data:
+            logger.info(f"Pushing event: {event_type}")
+            
+            if event_type == "TOOL_CALL":
+                await callback.push_event("tool_start", {
+                    "tool": event_data.get("tool", "unknown"),
+                    "args": event_data.get("args", {})
+                })
+            elif event_type == "TOOL_RESULT":
+                await callback.push_event("tool_end", {
+                    "tool": event_data.get("tool", "unknown"),
+                    "result": event_data.get("result", "")
+                })
+            elif event_type == "LLM_RESPONSE":
+                content = event_data.get("content", "")
+                if content and content != last_content:
+                    await callback.push_event("message", {
+                        "content": content,
+                        "partial": True
+                    })
+                    last_content = content
+            elif event_type == "AGENT_END":
+                output = event_data.get("output", "")
+                if output and output != last_content:
+                    await callback.push_event("message", {
+                        "content": output,
+                        "final": True
+                    })
+            elif event_type == "ERROR":
+                await callback.push_event("error", event_data)
+        
+        return last_content
     
     async def invoke_stream(
         self,
@@ -241,35 +227,29 @@ class AgentClient:
         actor_id: str = "default"
     ) -> AsyncIterator[str]:
         """
-        Stream response using queue-based producer-consumer pattern.
+        Stream response using TRUE async streaming.
         
-        Architecture:
-        - Producer (background task): Calls Bedrock, pushes events to queue
-        - Consumer (this generator): Yields SSE from queue
+        Producer spawns background task that streams from Bedrock.
+        Consumer yields SSE events from queue immediately.
         """
-        # Create callback handler with queue
         callback = StreamingCallbackHandler(session_id)
         
-        # Start event
         yield f"event: start\ndata: {json.dumps({'session_id': session_id})}\n\n"
         
-        # Spawn producer as background task
+        # Spawn producer
         producer_task = asyncio.create_task(
-            self._process_bedrock_request(prompt, session_id, actor_id, callback)
+            self._process_bedrock_stream(prompt, session_id, actor_id, callback)
         )
         
         try:
-            # Consumer: Yield events from queue
             while True:
                 event = await callback.get_event(timeout=120.0)
                 
-                if event is None:  # Sentinel - streaming complete
+                if event is None:
                     break
                 
-                # Format as SSE
                 yield f"event: {event.event_type}\ndata: {json.dumps(event.data)}\n\n"
             
-            # Done event
             yield f"event: done\ndata: {json.dumps({'status': 'complete'})}\n\n"
             
         except Exception as e:
@@ -277,7 +257,6 @@ class AgentClient:
             yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
         
         finally:
-            # Ensure producer task completes
             if not producer_task.done():
                 producer_task.cancel()
                 try:
@@ -286,11 +265,9 @@ class AgentClient:
                     pass
 
 
-# Singleton instance
 _client = None
 
 def get_agent_client() -> AgentClient:
-    """Get or create AgentClient singleton."""
     global _client
     if _client is None:
         _client = AgentClient()
