@@ -1,79 +1,58 @@
 """
-Agent Client - Proxy to AWS Bedrock AgentCore
+Agent Client - Bridge between BFF and AWS Bedrock AgentCore
 
-This client forwards requests to the deployed agent with true streaming support.
-Parses the agent runtime's wrapped SSE format and re-emits events to the frontend.
+Uses queue-based producer-consumer pattern for streaming:
+- Producer: Invokes Bedrock AgentCore and pushes events to queue
+- Consumer: SSE Generator yields from queue
+
+Reference: https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/response-streaming.html
 """
 import boto3
 import json
 import logging
 import asyncio
-import re
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
+from dataclasses import dataclass
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-def parse_agent_runtime_events(raw_response: str) -> list:
+@dataclass
+class StreamEvent:
+    """Streaming event pushed to queue."""
+    event_type: str  # agent_start, tool_start, tool_end, message, error, done
+    data: dict
+
+
+class StreamingCallbackHandler:
     """
-    Parse the agent runtime's wrapped SSE format.
-    
-    The agent runtime returns events like:
-    data: "event: AGENT_START\ndata: {...}\n\n"
-    data: "event: TOOL_CALL\ndata: {...}\n\n"
-    ...
-    
-    Returns list of (event_type, event_data) tuples.
+    Queue-based handler for streaming events.
+    Producer pushes events, Consumer yields them.
     """
-    events = []
     
-    # Split by "data: " prefix (each chunk is a JSON-escaped SSE event)
-    chunks = raw_response.split('\ndata: ')
+    def __init__(self, session_id: str):
+        self.session_id = session_id
+        self.queue: asyncio.Queue[Optional[StreamEvent]] = asyncio.Queue()
     
-    for chunk in chunks:
-        chunk = chunk.strip()
-        if not chunk:
-            continue
-            
-        # Remove leading "data: " if present (for first chunk)
-        if chunk.startswith('data: '):
-            chunk = chunk[6:]
-        
-        # Parse the JSON-escaped string
+    async def push_event(self, event_type: str, data: dict) -> None:
+        """Producer: Push event to queue."""
+        await self.queue.put(StreamEvent(event_type=event_type, data=data))
+    
+    async def get_event(self, timeout: float = 60.0) -> Optional[StreamEvent]:
+        """Consumer: Get event from queue with timeout."""
         try:
-            # The chunk should be a JSON string like "event: ...\ndata: ...\n\n"
-            if chunk.startswith('"') and chunk.endswith('"'):
-                inner = json.loads(chunk)
-            else:
-                inner = chunk
-            
-            # Now parse the inner SSE event
-            event_type = None
-            event_data = None
-            
-            for line in inner.split('\n'):
-                line = line.strip()
-                if line.startswith('event:'):
-                    event_type = line[6:].strip()
-                elif line.startswith('data:'):
-                    try:
-                        event_data = json.loads(line[5:].strip())
-                    except json.JSONDecodeError:
-                        event_data = {"raw": line[5:].strip()}
-            
-            if event_type and event_data:
-                events.append((event_type, event_data))
-                
-        except (json.JSONDecodeError, Exception) as e:
-            logger.warning(f"Failed to parse chunk: {chunk[:100]}... - {e}")
-            continue
+            return await asyncio.wait_for(self.queue.get(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return None
     
-    return events
+    async def end_streaming(self) -> None:
+        """Signal completion with sentinel."""
+        await self.queue.put(None)
 
 
 class AgentClient:
-    """Client for forwarding requests to AWS Bedrock AgentCore with streaming."""
+    """Client for Bedrock AgentCore with queue-based streaming."""
     
     def __init__(self):
         self.client = boto3.client(
@@ -89,16 +68,12 @@ class AgentClient:
         session_id: str,
         actor_id: str = "default"
     ) -> str:
-        """
-        Forward request to Bedrock AgentCore (blocking).
-        """
+        """Forward request to Bedrock AgentCore (blocking)."""
         payload = json.dumps({
             "prompt": prompt,
             "session_id": session_id,
             "actor_id": actor_id
         })
-        
-        logger.info(f"Invoking agent: session={session_id}, prompt={prompt[:50]}...")
         
         try:
             response = self.client.invoke_agent_runtime(
@@ -116,24 +91,24 @@ class AgentClient:
             else:
                 result = str(response)
             
-            logger.info(f"Agent response: {result[:100]}...")
             return result
             
         except Exception as e:
             logger.error(f"Error invoking agent: {e}")
             raise
     
-    async def invoke_stream(
+    async def _process_bedrock_request(
         self,
         prompt: str,
         session_id: str,
-        actor_id: str = "default"
-    ) -> AsyncIterator[str]:
+        actor_id: str,
+        callback: StreamingCallbackHandler
+    ) -> None:
         """
-        Forward request to Bedrock AgentCore with streaming.
+        Producer: Invokes Bedrock AgentCore and pushes events to queue.
         
-        Parses the agent runtime's wrapped SSE format and re-emits
-        events in standard SSE format for the frontend.
+        This runs in a background task, iterating over the agent's
+        response and pushing each event to the queue immediately.
         """
         payload = json.dumps({
             "prompt": prompt,
@@ -142,14 +117,16 @@ class AgentClient:
             "stream": True
         })
         
-        logger.info(f"Streaming invoke: session={session_id}")
-        
-        # Start event
-        yield f"event: start\ndata: {json.dumps({'session_id': session_id})}\n\n"
-        
         try:
-            # Call boto3 synchronously (it doesn't support async)
-            response = await asyncio.get_event_loop().run_in_executor(
+            # Push start event
+            await callback.push_event("agent_start", {
+                "session_id": session_id,
+                "status": "started"
+            })
+            
+            # Run boto3 call in thread (it's synchronous)
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
                 None,
                 lambda: self.client.invoke_agent_runtime(
                     agentRuntimeArn=self.runtime_arn,
@@ -162,53 +139,151 @@ class AgentClient:
             streaming_body = response.get("response")
             
             if streaming_body:
-                # Read the full response
+                # Read and parse the response
                 raw_data = streaming_body.read()
                 if isinstance(raw_data, bytes):
                     raw_data = raw_data.decode("utf-8")
                 
-                logger.info(f"Raw response length: {len(raw_data)}")
+                # Parse SSE events from agent runtime
+                events = self._parse_agent_events(raw_data)
                 
-                # Parse the wrapped SSE events
-                events = parse_agent_runtime_events(raw_data)
-                logger.info(f"Parsed {len(events)} events")
-                
-                # Track last content to avoid duplicates
+                # Push each event to queue with small delay for visual streaming
                 last_content = ""
-                
-                # Re-emit events with frontend-friendly names
                 for event_type, event_data in events:
-                    logger.info(f"Emitting event: {event_type}")
+                    logger.info(f"Pushing event: {event_type}")
                     
                     if event_type == "AGENT_START":
-                        yield f"event: agent_start\ndata: {json.dumps(event_data)}\n\n"
+                        # Already pushed above
+                        pass
                     elif event_type == "TOOL_CALL":
-                        yield f"event: tool_start\ndata: {json.dumps({'tool': event_data.get('tool', 'unknown'), 'args': event_data.get('args', {})})}\n\n"
+                        await callback.push_event("tool_start", {
+                            "tool": event_data.get("tool", "unknown"),
+                            "args": event_data.get("args", {})
+                        })
+                        await asyncio.sleep(0.1)  # Visual delay
                     elif event_type == "TOOL_RESULT":
-                        yield f"event: tool_end\ndata: {json.dumps({'tool': event_data.get('tool', 'unknown'), 'result': event_data.get('result', '')})}\n\n"
+                        await callback.push_event("tool_end", {
+                            "tool": event_data.get("tool", "unknown"),
+                            "result": event_data.get("result", "")
+                        })
+                        await asyncio.sleep(0.1)  # Visual delay
                     elif event_type == "LLM_RESPONSE":
                         content = event_data.get("content", "")
                         if content and content != last_content:
-                            yield f"event: message\ndata: {json.dumps({'content': content, 'partial': True})}\n\n"
+                            await callback.push_event("message", {
+                                "content": content,
+                                "partial": True
+                            })
                             last_content = content
                     elif event_type == "AGENT_END":
                         output = event_data.get("output", "")
-                        # Only emit if different from last LLM_RESPONSE
                         if output and output != last_content:
-                            yield f"event: message\ndata: {json.dumps({'content': output, 'final': True})}\n\n"
+                            await callback.push_event("message", {
+                                "content": output,
+                                "final": True
+                            })
                     elif event_type == "ERROR":
-                        yield f"event: error\ndata: {json.dumps(event_data)}\n\n"
-                    
-                    # Small delay between events for visual effect
-                    await asyncio.sleep(0.05)
+                        await callback.push_event("error", event_data)
             
+        except Exception as e:
+            logger.error(f"Producer error: {e}")
+            await callback.push_event("error", {"error": str(e)})
+        
+        finally:
+            # Signal completion
+            await callback.end_streaming()
+    
+    def _parse_agent_events(self, raw_response: str) -> list:
+        """Parse agent runtime's wrapped SSE format."""
+        events = []
+        chunks = raw_response.split('\ndata: ')
+        
+        for chunk in chunks:
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            
+            if chunk.startswith('data: '):
+                chunk = chunk[6:]
+            
+            try:
+                if chunk.startswith('"') and chunk.endswith('"'):
+                    inner = json.loads(chunk)
+                else:
+                    inner = chunk
+                
+                event_type = None
+                event_data = None
+                
+                for line in inner.split('\n'):
+                    line = line.strip()
+                    if line.startswith('event:'):
+                        event_type = line[6:].strip()
+                    elif line.startswith('data:'):
+                        try:
+                            event_data = json.loads(line[5:].strip())
+                        except json.JSONDecodeError:
+                            event_data = {"raw": line[5:].strip()}
+                
+                if event_type and event_data:
+                    events.append((event_type, event_data))
+                    
+            except Exception as e:
+                logger.warning(f"Failed to parse chunk: {e}")
+                continue
+        
+        return events
+    
+    async def invoke_stream(
+        self,
+        prompt: str,
+        session_id: str,
+        actor_id: str = "default"
+    ) -> AsyncIterator[str]:
+        """
+        Stream response using queue-based producer-consumer pattern.
+        
+        Architecture:
+        - Producer (background task): Calls Bedrock, pushes events to queue
+        - Consumer (this generator): Yields SSE from queue
+        """
+        # Create callback handler with queue
+        callback = StreamingCallbackHandler(session_id)
+        
+        # Start event
+        yield f"event: start\ndata: {json.dumps({'session_id': session_id})}\n\n"
+        
+        # Spawn producer as background task
+        producer_task = asyncio.create_task(
+            self._process_bedrock_request(prompt, session_id, actor_id, callback)
+        )
+        
+        try:
+            # Consumer: Yield events from queue
+            while True:
+                event = await callback.get_event(timeout=120.0)
+                
+                if event is None:  # Sentinel - streaming complete
+                    break
+                
+                # Format as SSE
+                yield f"event: {event.event_type}\ndata: {json.dumps(event.data)}\n\n"
+            
+            # Done event
             yield f"event: done\ndata: {json.dumps({'status': 'complete'})}\n\n"
             
         except Exception as e:
-            logger.error(f"Streaming error: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
+            logger.error(f"Consumer error: {e}")
             yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+        
+        finally:
+            # Ensure producer task completes
+            if not producer_task.done():
+                producer_task.cancel()
+                try:
+                    await producer_task
+                except asyncio.CancelledError:
+                    pass
 
 
 # Singleton instance

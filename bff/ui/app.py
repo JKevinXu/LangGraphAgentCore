@@ -28,21 +28,18 @@ st.markdown("""
         border-bottom: 1px solid #333;
         margin-bottom: 1rem;
     }
-    .status-badge {
-        display: inline-block;
-        padding: 0.25rem 0.5rem;
-        border-radius: 0.25rem;
-        font-size: 0.75rem;
-        margin-left: 0.5rem;
+    .event-log {
+        font-family: 'Monaco', 'Menlo', monospace;
+        font-size: 0.8rem;
+        padding: 0.75rem;
+        background: #1a1a2e;
+        border-radius: 0.5rem;
+        margin-bottom: 0.5rem;
+        border-left: 3px solid #4a5568;
     }
-    .status-connected {
-        background-color: #065f46;
-        color: #d1fae5;
-    }
-    .status-disconnected {
-        background-color: #991b1b;
-        color: #fee2e2;
-    }
+    .event-thinking { border-left-color: #a78bfa; }
+    .event-tool { border-left-color: #60a5fa; }
+    .event-result { border-left-color: #34d399; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -67,6 +64,9 @@ with st.sidebar:
     
     # Streaming toggle
     use_streaming = st.toggle("Enable Streaming", value=True)
+    
+    # Show tool events toggle
+    show_tool_events = st.toggle("Show Tool Events", value=True)
     
     # Connection test
     if st.button("🔗 Test Connection", use_container_width=True):
@@ -111,20 +111,21 @@ for message in st.session_state.messages:
         st.markdown(message["content"])
 
 
-def stream_response(bff_url: str, prompt: str, session_id: str) -> Generator[tuple[str, bool], None, None]:
+def stream_response(bff_url: str, prompt: str, session_id: str) -> Generator[dict, None, None]:
     """
     Stream response from BFF using SSE.
     
-    BFF handles parsing - frontend just receives clean content.
-    
-    SSE Events:
-    - event: start - Session started
-    - event: message - Content chunk (may be partial or complete)
-    - event: done - Streaming complete
-    - event: error - Error occurred
+    SSE Events from BFF:
+    - event: start       - Session started
+    - event: agent_start - Agent begins processing
+    - event: tool_start  - Tool invocation (tool name, args)
+    - event: tool_end    - Tool result
+    - event: message     - LLM response content
+    - event: done        - Streaming complete
+    - event: error       - Error occurred
     
     Yields:
-        Tuple of (content, is_partial) - is_partial=True for streaming chunks
+        Dict with event type and data
     """
     try:
         with httpx.Client(timeout=120.0) as client:
@@ -135,7 +136,7 @@ def stream_response(bff_url: str, prompt: str, session_id: str) -> Generator[tup
                 headers={"Accept": "text/event-stream"}
             ) as response:
                 if response.status_code != 200:
-                    yield (f"Error: HTTP {response.status_code}", False)
+                    yield {"type": "error", "error": f"HTTP {response.status_code}"}
                     return
                 
                 buffer = ""
@@ -163,26 +164,18 @@ def stream_response(bff_url: str, prompt: str, session_id: str) -> Generator[tup
                                 except json.JSONDecodeError:
                                     data = {"content": line[6:]}
                         
-                        # Handle event types
-                        if event_type == "message":
-                            content = data.get("content", "")
-                            is_partial = data.get("partial", True)
-                            if content:
-                                yield (content, is_partial)
+                        # Yield structured event
+                        yield {"type": event_type, **data}
                         
-                        elif event_type == "error":
-                            yield (f"Error: {data.get('error', 'Unknown error')}", False)
-                            return
-                        
-                        elif event_type == "done":
+                        if event_type == "done":
                             return
                             
     except httpx.TimeoutException:
-        yield ("Error: Request timed out. Please try again.", False)
+        yield {"type": "error", "error": "Request timed out"}
     except httpx.ConnectError:
-        yield ("Error: Could not connect to BFF. Is the service running?", False)
+        yield {"type": "error", "error": "Could not connect to BFF"}
     except Exception as e:
-        yield (f"Error: {e}", False)
+        yield {"type": "error", "error": str(e)}
 
 
 def get_response(bff_url: str, prompt: str, session_id: str) -> str:
@@ -212,25 +205,54 @@ if prompt := st.chat_input("Type your message..."):
     # Get assistant response
     with st.chat_message("assistant"):
         if use_streaming:
-            # Streaming response
+            # Streaming response with accumulated event display
+            events_container = st.container()
             response_placeholder = st.empty()
-            full_response = ""
             
-            for content, is_partial in stream_response(bff_url, prompt, session_id):
-                if content:
-                    if is_partial:
-                        # Partial chunk - this IS the accumulated content so far
+            full_response = ""
+            event_log = []  # Accumulate events
+            
+            for event in stream_response(bff_url, prompt, session_id):
+                event_type = event.get("type", "unknown")
+                
+                if event_type == "agent_start" and show_tool_events:
+                    event_log.append("🤔 Thinking...")
+                    with events_container:
+                        st.markdown("\n".join(event_log))
+                
+                elif event_type == "tool_start" and show_tool_events:
+                    tool_name = event.get("tool", "unknown")
+                    args = event.get("args", {})
+                    args_str = ", ".join(f"{k}=`{v}`" for k, v in args.items()) if args else ""
+                    event_log.append(f"🔧 **{tool_name}**({args_str})")
+                    with events_container:
+                        st.markdown("\n".join(event_log))
+                
+                elif event_type == "tool_end" and show_tool_events:
+                    tool_name = event.get("tool", "unknown")
+                    result = event.get("result", "")
+                    event_log.append(f"✅ Result: `{result}`")
+                    with events_container:
+                        st.markdown("\n".join(event_log))
+                
+                elif event_type == "message":
+                    content = event.get("content", "")
+                    if content:
                         full_response = content
-                    else:
-                        # Final complete response
-                        full_response = content
-                    # Show with cursor indicator while streaming
-                    response_placeholder.markdown(full_response + " ▌")
+                        response_placeholder.markdown(full_response + " ▌")
+                
+                elif event_type == "error":
+                    error = event.get("error", "Unknown error")
+                    response_placeholder.error(f"❌ {error}")
+                    full_response = f"Error: {error}"
+                
+                elif event_type == "done":
+                    break
             
             # Final display without cursor
-            if full_response:
+            if full_response and not full_response.startswith("Error:"):
                 response_placeholder.markdown(full_response)
-            else:
+            elif not full_response:
                 response_placeholder.markdown("*No response received*")
         else:
             # Blocking response
@@ -253,4 +275,3 @@ with col1:
     st.caption(f"Session: `{session_id[:20]}...`")
 with col2:
     st.caption(f"Messages: {len(st.session_state.messages)}")
-

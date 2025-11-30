@@ -2,7 +2,8 @@
 AWS Bedrock Agent Core Runtime integration for LangGraphAgentCore.
 
 This module enables deploying your LangGraph agents to AWS Bedrock Agent Core Runtime.
-Supports TRUE STREAMING via SSE-formatted generator responses.
+Supports TRUE STREAMING via async generators as per AWS documentation.
+Reference: https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/response-streaming.html
 """
 
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
@@ -13,7 +14,7 @@ from langchain_aws import ChatBedrock
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 from datetime import datetime
-from typing import Annotated, TypedDict, Generator
+from typing import Annotated, TypedDict, AsyncGenerator
 import math
 import operator
 import os
@@ -223,32 +224,31 @@ agent = create_agent()
 
 
 def format_sse_event(event_type: str, data: dict) -> str:
-    """Format an event as SSE with flush."""
+    """Format an event as SSE."""
     return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
 
-def stream_agent_events(agent, input_data: dict, config: dict = None, session_id: str = "unknown") -> Generator[str, None, None]:
+async def stream_agent_async(agent, input_data: dict, config: dict = None, session_id: str = "unknown") -> AsyncGenerator[str, None]:
     """
-    Stream agent execution events as SSE.
+    Stream agent execution events using async generator.
     
-    Uses LangGraph's stream() to get incremental updates and yields them
-    as Server-Sent Events for TRUE real-time streaming.
+    Uses LangGraph's astream() for TRUE async streaming as per AWS docs:
+    https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/response-streaming.html
     
     Yields:
-        SSE-formatted event strings as they happen
+        SSE-formatted event strings as they happen in real-time
     """
     # Start event
     yield format_sse_event("AGENT_START", {
         "timestamp": datetime.now().isoformat(),
         "session_id": session_id
     })
-    sys.stdout.flush()
     
     final_output = ""
     
     try:
-        # Use stream() for TRUE incremental updates
-        for event in agent.stream(input_data, config=config, stream_mode="updates"):
+        # Use astream() for TRUE async streaming - events are yielded as they happen!
+        async for event in agent.astream(input_data, config=config, stream_mode="updates"):
             timestamp = datetime.now().isoformat()
             
             # Process each node's output immediately
@@ -264,7 +264,6 @@ def stream_agent_events(agent, input_data: dict, config: dict = None, session_id
                                         "tool": tool_call.get("name", "unknown"),
                                         "args": tool_call.get("args", {})
                                     })
-                                    sys.stdout.flush()
                             else:
                                 content = msg.content if hasattr(msg, 'content') else str(msg)
                                 final_output = content
@@ -272,7 +271,6 @@ def stream_agent_events(agent, input_data: dict, config: dict = None, session_id
                                     "timestamp": timestamp,
                                     "content": content
                                 })
-                                sys.stdout.flush()
                                 
                 elif node_name == "tools":
                     messages = node_output.get("messages", [])
@@ -283,7 +281,6 @@ def stream_agent_events(agent, input_data: dict, config: dict = None, session_id
                                 "tool": msg.name if hasattr(msg, 'name') else "unknown",
                                 "result": msg.content if hasattr(msg, 'content') else str(msg)
                             })
-                            sys.stdout.flush()
         
         # End event
         yield format_sse_event("AGENT_END", {
@@ -299,11 +296,14 @@ def stream_agent_events(agent, input_data: dict, config: dict = None, session_id
 
 
 @app.entrypoint
-def invoke_agent(payload, context=None):
+async def invoke_agent(payload, context=None):
     """
-    Entrypoint for AWS Bedrock Agent Core Runtime with TRUE STREAMING.
+    Async entrypoint for AWS Bedrock Agent Core Runtime with TRUE STREAMING.
     
-    When stream=True, yields SSE events as they happen using a generator.
+    Uses async generator pattern as per AWS documentation:
+    https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/response-streaming.html
+    
+    When stream=True, yields SSE events in real-time using async for.
     When stream=False, returns the final response string (blocking).
     
     Args:
@@ -315,7 +315,7 @@ def invoke_agent(payload, context=None):
         context: AgentCore runtime context (optional, contains memory_id)
         
     Returns:
-        If stream=True: Generator yielding SSE events
+        If stream=True: Async generator yielding SSE events in real-time
         If stream=False: Agent's final response string
     """
     user_input = payload.get("prompt", "")
@@ -361,22 +361,22 @@ def invoke_agent(payload, context=None):
     else:
         print("ℹ️  No memory configured, running without persistence")
     
-    # STREAMING MODE: Return generator that yields SSE events
+    # STREAMING MODE: Use async generator for TRUE real-time streaming
     if use_streaming:
-        print("📡 TRUE STREAMING enabled - yielding events as they happen")
-        # Return the generator directly - BedrockAgentCoreApp should handle streaming
-        return stream_agent_events(agent, input_data, config, session_id)
-    
-    # NON-STREAMING MODE: Blocking invoke
-    if config:
-        response = agent.invoke(input_data, config=config)
+        print("📡 TRUE ASYNC STREAMING enabled")
+        # Yield events from async generator - each event is sent immediately!
+        async for event in stream_agent_async(agent, input_data, config, session_id):
+            yield event
     else:
-        response = agent.invoke(input_data)
-    
-    return response["messages"][-1].content
+        # NON-STREAMING MODE: Blocking invoke, yield single result
+        if config:
+            response = agent.invoke(input_data, config=config)
+        else:
+            response = agent.invoke(input_data)
+        
+        yield response["messages"][-1].content
 
 
 if __name__ == "__main__":
     # This allows testing locally
     app.run()
-
