@@ -77,7 +77,7 @@ class AgentClient:
                 result = await streaming_body.read()
                 if isinstance(result, bytes):
                     result = result.decode("utf-8")
-                return result
+            return result
             return str(response)
     
     async def _process_bedrock_stream(
@@ -108,13 +108,13 @@ class AgentClient:
             
             async with self.session.client("bedrock-agentcore", region_name=self.region) as client:
                 response = await client.invoke_agent_runtime(
-                    agentRuntimeArn=self.runtime_arn,
-                    runtimeSessionId=session_id,
-                    payload=payload,
-                    qualifier="DEFAULT"
-                )
-                
-                streaming_body = response.get("response")
+                agentRuntimeArn=self.runtime_arn,
+                runtimeSessionId=session_id,
+                payload=payload,
+                qualifier="DEFAULT"
+            )
+            
+            streaming_body = response.get("response")
                 
                 if streaming_body:
                     buffer = ""
@@ -176,7 +176,7 @@ class AgentClient:
                             event_data = {"raw": line[5:].strip()}
             except:
                 pass
-        else:
+            else:
             for line in event_str.strip().split('\n'):
                 line = line.strip()
                 if line.startswith('event:'):
@@ -235,7 +235,7 @@ class AgentClient:
         callback = StreamingCallbackHandler(session_id)
         
         yield f"event: start\ndata: {json.dumps({'session_id': session_id})}\n\n"
-        
+            
         # Spawn producer
         producer_task = asyncio.create_task(
             self._process_bedrock_stream(prompt, session_id, actor_id, callback)
@@ -255,7 +255,7 @@ class AgentClient:
         except Exception as e:
             logger.error(f"Consumer error: {e}")
             yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
-        
+
         finally:
             if not producer_task.done():
                 producer_task.cancel()

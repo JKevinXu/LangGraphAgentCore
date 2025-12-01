@@ -1,4 +1,0 @@
-streamlit>=1.30.0
-httpx>=0.26.0
-sseclient-py>=1.8.0
-

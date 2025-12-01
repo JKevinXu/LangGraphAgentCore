@@ -97,21 +97,6 @@ payload = json.dumps({
     "session_id": "session-123",
     "actor_id": "user-alice"
 })
-
-# With streaming (real-time events)
-import asyncio
-from bedrock.agent_runtime import stream_agent
-
-async def stream_example():
-    payload = {
-        "prompt": "What is 15 * 23?",
-        "session_id": "session-123",
-        "stream": True
-    }
-    async for event in stream_agent(payload):
-        print(event)  # Process SSE events
-
-asyncio.run(stream_example())
 response = client.invoke_agent_runtime(
     agentRuntimeArn='your-runtime-arn',
     runtimeSessionId='session-123',
@@ -163,12 +148,9 @@ See [bedrock/README.md](bedrock/README.md) for complete deployment guide.
 - ✅ **Bedrock Models** - Claude, Titan, and more
 - ✅ **Tool Support** - Easy custom tool creation
 - ✅ **Short-Term Memory** - Conversation persistence with AgentCore Memory
-- ✅ **Streaming Responses** - Real-time event streaming with SSE
-- ✅ **Browser Tool** - Web browsing with AgentCore Browser
-- ✅ **Code Interpreter** - Python code execution in sandboxed environment
 - ✅ **Production Ready** - Built for AWS infrastructure
 - ✅ **Auto-scaling** - Managed by AWS
-- ✅ **Observability** - CloudWatch integration with node-level tracing
+- ✅ **Observability** - CloudWatch integration
 - ✅ **Secure** - IAM and VPC support
 
 ## Project Structure
@@ -210,10 +192,7 @@ AGENT_TEMPERATURE=0.7
 
 - **Deployment Guide**: [bedrock/README.md](bedrock/README.md)
 - **Memory Support**: [MEMORY_SUPPORT.md](MEMORY_SUPPORT.md) - Short-term memory persistence
-- **Streaming Responses**: [STREAMING_USAGE.md](STREAMING_USAGE.md) - Real-time streaming guide
-- **Streaming Design**: [STREAMING_RESPONSE_DESIGN.md](STREAMING_RESPONSE_DESIGN.md) - Architecture and design
 - **Node Tracing**: [LANGGRAPH_NODE_TRACING.md](LANGGRAPH_NODE_TRACING.md) - LangGraph observability
-- **Browser Tool**: [BROWSER_TOOL_INTEGRATION_PLAN.md](BROWSER_TOOL_INTEGRATION_PLAN.md) - Web browsing integration
 - **Deployment Status**: [DEPLOYMENT_COMPLETE.md](DEPLOYMENT_COMPLETE.md)
 
 ## Resources

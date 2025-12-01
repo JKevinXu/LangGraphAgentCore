@@ -237,9 +237,9 @@ if prompt := st.chat_input("Type your message..."):
                 
                 elif event_type == "message":
                     content = event.get("content", "")
-                    if content:
+                if content:
                         full_response = content
-                        response_placeholder.markdown(full_response + " ▌")
+                    response_placeholder.markdown(full_response + " ▌")
                 
                 elif event_type == "error":
                     error = event.get("error", "Unknown error")
