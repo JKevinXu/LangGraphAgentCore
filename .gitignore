@@ -59,6 +59,10 @@ dmypy.json
 
 memory_id.txt
 
+# CDK
+cdk.out/
+**/cdk.out/
+
 # CDK build artifacts
 cdk.out/
 *.cdk.staging/
