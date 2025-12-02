@@ -66,3 +66,7 @@ cdk.out/
 # CDK build artifacts
 cdk.out/
 *.cdk.staging/
+
+# CDK build artifacts
+cdk.out/
+**/cdk.out/
