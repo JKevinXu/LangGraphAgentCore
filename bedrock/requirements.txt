@@ -19,3 +19,6 @@ opentelemetry-instrumentation-langchain>=0.45.0
 
 # AgentCore Browser Tool
 playwright>=1.40.0
+
+# Observability
+langfuse>=2.0.0

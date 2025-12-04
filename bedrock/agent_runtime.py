@@ -18,6 +18,7 @@ import operator
 import os
 from browser_tool import get_browser_tool
 from code_interpreter_tool import get_code_interpreter_tool
+from langfuse_config import get_langfuse_handler
 
 # Enable LangSmith OpenTelemetry integration for LangGraph node-level tracing
 os.environ["LANGSMITH_OTEL_ENABLED"] = "true"
@@ -265,6 +266,20 @@ def invoke_agent(payload, context=None):
     if "code_execution_history" in payload:
         input_data["code_execution_history"] = payload["code_execution_history"]
     
+    # Initialize Langfuse callback handler for observability
+    langfuse_handler = get_langfuse_handler(
+        session_id=session_id,
+        user_id=actor_id,
+        metadata={
+            "request_source": payload.get("source", "api"),
+        }
+    )
+    
+    # Build callbacks list
+    callbacks = []
+    if langfuse_handler:
+        callbacks.append(langfuse_handler)
+    
     # If memory is enabled, pass configuration with thread_id and actor_id
     if memory_id:
         config = {
@@ -276,15 +291,24 @@ def invoke_agent(payload, context=None):
             "metadata": {
                 "request_timestamp": datetime.now().isoformat(),
                 "request_source": payload.get("source", "api"),
-            }
+            },
+            "callbacks": callbacks,
         }
         print(f"🔗 Using memory: {memory_id} for session: {session_id}")
         # Invoke with memory configuration
         response = agent.invoke(input_data, config=config)
     else:
         print("ℹ️  No memory configured, running without persistence")
-        # Invoke without memory configuration
-        response = agent.invoke(input_data)
+        # Invoke without memory configuration (but with callbacks if available)
+        config = {"callbacks": callbacks} if callbacks else {}
+        response = agent.invoke(input_data, config=config if config else None)
+    
+    # Flush Langfuse traces before returning
+    if langfuse_handler:
+        try:
+            langfuse_handler.flush()
+        except Exception as e:
+            print(f"⚠️  Failed to flush Langfuse: {e}")
     
     # Extract the final message content
     return response["messages"][-1].content
