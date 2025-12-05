@@ -46,10 +46,13 @@ def get_langfuse_handler(
         return None
     
     try:
+        # Support both LANGFUSE_HOST and LANGFUSE_BASE_URL
+        host = os.environ.get("LANGFUSE_HOST") or os.environ.get("LANGFUSE_BASE_URL", "https://cloud.langfuse.com")
+        
         handler = LangfuseCallbackHandler(
             public_key=public_key,
             secret_key=secret_key,
-            host=os.environ.get("LANGFUSE_HOST", "https://cloud.langfuse.com"),
+            host=host,
             session_id=session_id,
             user_id=user_id,
             release=os.environ.get("AGENT_VERSION", "1.0.0"),
