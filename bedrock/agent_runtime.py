@@ -18,7 +18,7 @@ import operator
 import os
 from browser_tool import get_browser_tool
 from code_interpreter_tool import get_code_interpreter_tool
-from langfuse_config import get_langfuse_handler
+from langfuse_config import get_langfuse_handler, update_trace_context, flush_langfuse
 
 # Enable LangSmith OpenTelemetry integration for LangGraph node-level tracing
 os.environ["LANGSMITH_OTEL_ENABLED"] = "true"
@@ -266,19 +266,19 @@ def invoke_agent(payload, context=None):
     if "code_execution_history" in payload:
         input_data["code_execution_history"] = payload["code_execution_history"]
     
-    # Initialize Langfuse callback handler for observability
-    langfuse_handler = get_langfuse_handler(
-        session_id=session_id,
-        user_id=actor_id,
-        metadata={
-            "request_source": payload.get("source", "api"),
-        }
-    )
+    # Initialize Langfuse callback handler for observability (v3 API)
+    langfuse_handler = get_langfuse_handler()
     
     # Build callbacks list
     callbacks = []
     if langfuse_handler:
         callbacks.append(langfuse_handler)
+        # Set trace context (session_id, user_id, etc.)
+        update_trace_context(
+            session_id=session_id,
+            user_id=actor_id,
+            metadata={"request_source": payload.get("source", "api")},
+        )
     
     # If memory is enabled, pass configuration with thread_id and actor_id
     if memory_id:
@@ -305,10 +305,7 @@ def invoke_agent(payload, context=None):
     
     # Flush Langfuse traces before returning
     if langfuse_handler:
-        try:
-            langfuse_handler.flush()
-        except Exception as e:
-            print(f"⚠️  Failed to flush Langfuse: {e}")
+        flush_langfuse()
     
     # Extract the final message content
     return response["messages"][-1].content
