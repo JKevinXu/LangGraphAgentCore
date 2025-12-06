@@ -2,6 +2,17 @@
 
 This document describes the real-time streaming implementation for LangGraphAgentCore.
 
+## Streaming Modes
+
+LangGraphAgentCore supports two streaming modes:
+
+| Mode | API | Granularity | Use Case |
+|------|-----|-------------|----------|
+| **Token** | `astream_events()` | Individual tokens | Real-time text generation |
+| **Node** | `astream()` | Node completions | Tool/step visibility |
+
+Set via payload: `{"stream": true, "stream_mode": "tokens"}` or `"nodes"`
+
 ## Architecture Overview
 
 ```
@@ -168,6 +179,31 @@ for event in stream_response(...):
 
 ### Agent Runtime → BFF
 
+**Token Mode (stream_mode: "tokens"):**
+```
+event: AGENT_START
+data: {"timestamp": "...", "session_id": "..."}
+
+event: TOKEN
+data: {"timestamp": "...", "token": "The", "index": 0}
+
+event: TOKEN
+data: {"timestamp": "...", "token": " result", "index": 1}
+
+event: TOKEN
+data: {"timestamp": "...", "token": " is", "index": 2}
+
+event: TOOL_CALL
+data: {"timestamp": "...", "tool": "calculator", "args": {"expression": "5+5"}}
+
+event: TOOL_RESULT
+data: {"timestamp": "...", "tool": "calculator", "result": "10"}
+
+event: AGENT_END
+data: {"timestamp": "...", "session_id": "...", "output": "The result is 10."}
+```
+
+**Node Mode (stream_mode: "nodes"):**
 ```
 event: AGENT_START
 data: {"timestamp": "...", "session_id": "..."}
@@ -193,6 +229,12 @@ data: {"session_id": "..."}
 
 event: agent_start
 data: {"session_id": "...", "status": "started"}
+
+event: token
+data: {"token": "The", "index": 0}
+
+event: token
+data: {"token": " result", "index": 1}
 
 event: tool_start
 data: {"tool": "calculator", "args": {"expression": "5+5"}}

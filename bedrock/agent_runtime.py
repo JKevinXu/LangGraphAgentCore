@@ -12,10 +12,11 @@ from langchain_aws import ChatBedrock
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage
 from datetime import datetime
-from typing import Annotated, TypedDict
+from typing import Annotated, TypedDict, AsyncGenerator
 import math
 import operator
 import os
+import json
 from browser_tool import get_browser_tool
 from code_interpreter_tool import get_code_interpreter_tool
 from langfuse_config import get_langfuse_handler, update_trace_context, flush_langfuse
@@ -220,26 +221,182 @@ When executing code, write clear, well-commented Python code and explain the res
 agent = create_agent()
 
 
+def format_sse_event(event_type: str, data: dict) -> str:
+    """Format data as Server-Sent Event."""
+    return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+
+
+async def stream_agent_tokens(
+    agent,
+    input_data: dict,
+    config: dict,
+    session_id: str
+) -> AsyncGenerator[str, None]:
+    """
+    Stream at TOKEN level for real-time text generation.
+    
+    Uses astream_events() to get fine-grained events including individual tokens.
+    """
+    yield format_sse_event("AGENT_START", {
+        "timestamp": datetime.now().isoformat(),
+        "session_id": session_id
+    })
+    
+    token_index = 0
+    current_tool = None
+    accumulated_content = ""
+    
+    try:
+        async for event in agent.astream_events(input_data, config=config, version="v2"):
+            event_type = event.get("event", "")
+            
+            # Token streaming from LLM
+            if event_type == "on_chat_model_stream":
+                chunk = event.get("data", {}).get("chunk")
+                if chunk and hasattr(chunk, "content") and chunk.content:
+                    token = chunk.content
+                    accumulated_content += token
+                    yield format_sse_event("TOKEN", {
+                        "timestamp": datetime.now().isoformat(),
+                        "token": token,
+                        "index": token_index
+                    })
+                    token_index += 1
+            
+            # Tool execution start
+            elif event_type == "on_tool_start":
+                tool_name = event.get("name", "unknown")
+                tool_input = event.get("data", {}).get("input", {})
+                current_tool = tool_name
+                yield format_sse_event("TOOL_CALL", {
+                    "timestamp": datetime.now().isoformat(),
+                    "tool": tool_name,
+                    "args": tool_input
+                })
+            
+            # Tool execution end
+            elif event_type == "on_tool_end":
+                tool_output = event.get("data", {}).get("output", "")
+                yield format_sse_event("TOOL_RESULT", {
+                    "timestamp": datetime.now().isoformat(),
+                    "tool": current_tool or "unknown",
+                    "result": str(tool_output)[:1000]  # Truncate large outputs
+                })
+            
+            # LLM response complete (for tool call detection)
+            elif event_type == "on_chat_model_end":
+                message = event.get("data", {}).get("output")
+                if message and hasattr(message, "tool_calls") and message.tool_calls:
+                    # Tool calls are coming, tokens were for reasoning
+                    pass
+                elif accumulated_content:
+                    # Final response without tools
+                    yield format_sse_event("LLM_RESPONSE", {
+                        "timestamp": datetime.now().isoformat(),
+                        "content": accumulated_content
+                    })
+                    accumulated_content = ""  # Reset for next LLM call
+    
+    except Exception as e:
+        yield format_sse_event("ERROR", {
+            "timestamp": datetime.now().isoformat(),
+            "error": str(e)
+        })
+    
+    yield format_sse_event("AGENT_END", {
+        "timestamp": datetime.now().isoformat(),
+        "session_id": session_id,
+        "output": accumulated_content
+    })
+
+
+async def stream_agent_nodes(
+    agent,
+    input_data: dict,
+    config: dict,
+    session_id: str
+) -> AsyncGenerator[str, None]:
+    """
+    Stream at NODE level (original implementation).
+    
+    Uses astream() with stream_mode="updates" for node-level updates.
+    """
+    yield format_sse_event("AGENT_START", {
+        "timestamp": datetime.now().isoformat(),
+        "session_id": session_id
+    })
+    
+    final_content = ""
+    
+    try:
+        async for event in agent.astream(input_data, config=config, stream_mode="updates"):
+            for node_name, node_output in event.items():
+                if node_name == "chatbot":
+                    messages = node_output.get("messages", [])
+                    if messages:
+                        msg = messages[-1]
+                        if hasattr(msg, "tool_calls") and msg.tool_calls:
+                            for tc in msg.tool_calls:
+                                yield format_sse_event("TOOL_CALL", {
+                                    "timestamp": datetime.now().isoformat(),
+                                    "tool": tc.get("name", "unknown"),
+                                    "args": tc.get("args", {})
+                                })
+                        elif hasattr(msg, "content") and msg.content:
+                            final_content = msg.content
+                            yield format_sse_event("LLM_RESPONSE", {
+                                "timestamp": datetime.now().isoformat(),
+                                "content": msg.content
+                            })
+                
+                elif node_name == "tools":
+                    messages = node_output.get("messages", [])
+                    for msg in messages:
+                        if hasattr(msg, "content"):
+                            yield format_sse_event("TOOL_RESULT", {
+                                "timestamp": datetime.now().isoformat(),
+                                "tool": getattr(msg, "name", "unknown"),
+                                "result": str(msg.content)[:1000]
+                            })
+    
+    except Exception as e:
+        yield format_sse_event("ERROR", {
+            "timestamp": datetime.now().isoformat(),
+            "error": str(e)
+        })
+    
+    yield format_sse_event("AGENT_END", {
+        "timestamp": datetime.now().isoformat(),
+        "session_id": session_id,
+        "output": final_content
+    })
+
+
 @app.entrypoint
-def invoke_agent(payload, context=None):
+async def invoke_agent(payload, context=None):
     """
     Entrypoint for AWS Bedrock Agent Core Runtime.
     
     This function is called by the runtime when the agent is invoked.
+    Supports both streaming (token-level and node-level) and blocking modes.
     
     Args:
         payload: Dictionary with keys:
             - 'prompt': User message (required)
             - 'session_id': Session ID for conversation continuity (optional)
             - 'actor_id': Actor ID for user/agent identification (optional)
+            - 'stream': Enable streaming response (optional, default: False)
+            - 'stream_mode': 'tokens' or 'nodes' (optional, default: 'tokens')
         context: AgentCore runtime context (optional, contains memory_id)
         
-    Returns:
-        Agent's response string
+    Yields/Returns:
+        SSE events when streaming, or agent's response string when blocking
     """
     user_input = payload.get("prompt", "")
     session_id = payload.get("session_id", "default-session")
     actor_id = payload.get("actor_id", "default-actor")
+    use_streaming = payload.get("stream", False)
+    stream_mode = payload.get("stream_mode", "tokens")  # 'tokens' or 'nodes'
     
     # Get memory ID from context if available (AgentCore passes it here)
     memory_id = MEMORY_ID  # First try environment variable
@@ -277,17 +434,19 @@ def invoke_agent(payload, context=None):
         update_trace_context(
             session_id=session_id,
             user_id=actor_id,
-            metadata={"request_source": payload.get("source", "api")},
+            metadata={
+                "request_source": payload.get("source", "api"),
+                "stream_mode": stream_mode if use_streaming else "none"
+            },
         )
     
-    # If memory is enabled, pass configuration with thread_id and actor_id
+    # Build config
     if memory_id:
         config = {
             "configurable": {
-                "thread_id": session_id,  # Maps to Bedrock AgentCore session_id
-                "actor_id": actor_id,      # Maps to Bedrock AgentCore actor_id
+                "thread_id": session_id,
+                "actor_id": actor_id,
             },
-            # Optional: Additional metadata (separate from state)
             "metadata": {
                 "request_timestamp": datetime.now().isoformat(),
                 "request_source": payload.get("source", "api"),
@@ -295,20 +454,35 @@ def invoke_agent(payload, context=None):
             "callbacks": callbacks,
         }
         print(f"🔗 Using memory: {memory_id} for session: {session_id}")
-        # Invoke with memory configuration
-        response = agent.invoke(input_data, config=config)
     else:
         print("ℹ️  No memory configured, running without persistence")
-        # Invoke without memory configuration (but with callbacks if available)
         config = {"callbacks": callbacks} if callbacks else {}
-        response = agent.invoke(input_data, config=config if config else None)
     
-    # Flush Langfuse traces before returning
-    if langfuse_handler:
-        flush_langfuse()
+    # STREAMING MODE
+    if use_streaming:
+        print(f"📡 Streaming enabled (mode: {stream_mode})")
+        
+        if stream_mode == "tokens":
+            async for event in stream_agent_tokens(agent, input_data, config, session_id):
+                yield event
+        else:
+            async for event in stream_agent_nodes(agent, input_data, config, session_id):
+                yield event
+        
+        # Flush Langfuse traces after streaming
+        if langfuse_handler:
+            flush_langfuse()
     
-    # Extract the final message content
-    return response["messages"][-1].content
+    # BLOCKING MODE
+    else:
+        response = await agent.ainvoke(input_data, config=config)
+        
+        # Flush Langfuse traces before returning
+        if langfuse_handler:
+            flush_langfuse()
+        
+        # Return final message content
+        yield response["messages"][-1].content
 
 
 if __name__ == "__main__":

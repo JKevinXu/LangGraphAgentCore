@@ -118,9 +118,10 @@ def stream_response(bff_url: str, prompt: str, session_id: str) -> Generator[dic
     SSE Events from BFF:
     - event: start       - Session started
     - event: agent_start - Agent begins processing
+    - event: token       - Individual token (real-time text generation)
     - event: tool_start  - Tool invocation (tool name, args)
     - event: tool_end    - Tool result
-    - event: message     - LLM response content
+    - event: message     - LLM response content (node-level streaming)
     - event: done        - Streaming complete
     - event: error       - Error occurred
     
@@ -235,11 +236,19 @@ if prompt := st.chat_input("Type your message..."):
                     with events_container:
                         st.markdown("\n".join(event_log))
                 
+                elif event_type == "token":
+                    # Token-level streaming - append each token
+                    token = event.get("token", "")
+                    if token:
+                        full_response += token
+                        response_placeholder.markdown(full_response + "▌")
+                
                 elif event_type == "message":
+                    # Node-level streaming - replace full content
                     content = event.get("content", "")
-                if content:
+                    if content:
                         full_response = content
-                    response_placeholder.markdown(full_response + " ▌")
+                        response_placeholder.markdown(full_response + " ▌")
                 
                 elif event_type == "error":
                     error = event.get("error", "Unknown error")

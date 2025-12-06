@@ -190,7 +190,15 @@ class AgentClient:
         if event_type and event_data:
             logger.info(f"Pushing event: {event_type}")
             
-            if event_type == "TOOL_CALL":
+            if event_type == "TOKEN":
+                # Token-level streaming - forward individual tokens
+                token = event_data.get("token", "")
+                if token:
+                    await callback.push_event("token", {
+                        "token": token,
+                        "index": event_data.get("index", 0)
+                    })
+            elif event_type == "TOOL_CALL":
                 await callback.push_event("tool_start", {
                     "tool": event_data.get("tool", "unknown"),
                     "args": event_data.get("args", {})
