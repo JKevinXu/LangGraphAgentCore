@@ -108,26 +108,80 @@ class AgentClient:
             
             async with self.session.client("bedrock-agentcore", region_name=self.region) as client:
                 response = await client.invoke_agent_runtime(
-                agentRuntimeArn=self.runtime_arn,
-                runtimeSessionId=session_id,
-                payload=payload,
-                qualifier="DEFAULT"
-            )
-            
-            streaming_body = response.get("response")
+                    agentRuntimeArn=self.runtime_arn,
+                    runtimeSessionId=session_id,
+                    payload=payload,
+                    qualifier="DEFAULT"
+                )
+                
+                streaming_body = response.get("response")
+                print(f"🔍 Response keys: {response.keys()}", flush=True)
+                print(f"🔍 Streaming body type: {type(streaming_body)}", flush=True)
+                logger.info(f"Response keys: {response.keys()}")
+                logger.info(f"Streaming body type: {type(streaming_body)}")
                 
                 if streaming_body:
                     buffer = ""
                     last_content = ""
                     
+                    # Check if it supports async iteration
+                    print(f"🔍 Has iter_chunks: {hasattr(streaming_body, 'iter_chunks')}", flush=True)
+                    print(f"🔍 Has __aiter__: {hasattr(streaming_body, '__aiter__')}", flush=True)
+                    print(f"🔍 Has read: {hasattr(streaming_body, 'read')}", flush=True)
+                    
+                    if hasattr(streaming_body, 'iter_chunks'):
+                        print("✅ Using iter_chunks for streaming", flush=True)
+                        logger.info("Using iter_chunks for streaming")
+                        chunk_iter = streaming_body.iter_chunks()
+                    elif hasattr(streaming_body, '__aiter__'):
+                        print("✅ Using async iteration", flush=True)
+                        logger.info("Using async iteration")
+                        chunk_iter = streaming_body
+                    else:
+                        # Fall back to reading the whole response
+                        print("⚠️ No streaming support, reading full response", flush=True)
+                        logger.info("No streaming support, reading full response")
+                        full_data = await streaming_body.read()
+                        if isinstance(full_data, bytes):
+                            full_data = full_data.decode("utf-8")
+                        print(f"📦 Full response data: {full_data[:500]}...", flush=True)
+                        logger.info(f"Full response data: {full_data[:500]}...")
+                        
+                        # Try to parse and forward the response
+                        try:
+                            import json
+                            parsed = json.loads(full_data)
+                            if isinstance(parsed, str):
+                                await callback.push_event("message", {
+                                    "content": parsed,
+                                    "final": True
+                                })
+                            elif isinstance(parsed, dict) and "output" in parsed:
+                                await callback.push_event("message", {
+                                    "content": parsed["output"],
+                                    "final": True
+                                })
+                            else:
+                                await callback.push_event("message", {
+                                    "content": str(parsed),
+                                    "final": True
+                                })
+                        except:
+                            await callback.push_event("message", {
+                                "content": full_data,
+                                "final": True
+                            })
+                        return
+                    
                     # TRUE ASYNC STREAMING: iterate over chunks as they arrive
-                    async for chunk in streaming_body.iter_chunks():
+                    async for chunk in chunk_iter:
                         if isinstance(chunk, tuple):
                             chunk = chunk[0]  # aioboto3 returns (chunk, metadata)
                         if isinstance(chunk, bytes):
                             chunk = chunk.decode("utf-8")
                         
                         logger.info(f"Received chunk: {len(chunk)} bytes")
+                        logger.info(f"Chunk content: {chunk[:200]}...")
                         buffer += chunk
                         
                         # Process complete SSE events
@@ -137,7 +191,25 @@ class AgentClient:
                     
                     # Process remaining buffer
                     if buffer.strip():
-                        await self._process_event(buffer, callback, last_content)
+                        logger.info(f"Final buffer content: {buffer[:200]}...")
+                        
+                        # Check if it looks like SSE format
+                        if buffer.startswith("event:") or buffer.startswith("data:"):
+                            await self._process_event(buffer, callback, last_content)
+                        else:
+                            # It's plain text response from AgentCore - emit as final message
+                            logger.info(f"Plain text response detected, emitting as message")
+                            # Try to parse as JSON (AgentCore might return quoted string)
+                            try:
+                                parsed = json.loads(buffer)
+                                content = parsed if isinstance(parsed, str) else str(parsed)
+                            except:
+                                content = buffer.strip()
+                            
+                            await callback.push_event("message", {
+                                "content": content,
+                                "final": True
+                            })
         
         except Exception as e:
             logger.error(f"Producer error: {e}")
@@ -176,7 +248,7 @@ class AgentClient:
                             event_data = {"raw": line[5:].strip()}
             except:
                 pass
-            else:
+        else:
             for line in event_str.strip().split('\n'):
                 line = line.strip()
                 if line.startswith('event:'):

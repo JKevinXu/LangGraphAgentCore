@@ -2,6 +2,8 @@
 AWS Bedrock Agent Core Runtime integration for LangGraphAgentCore.
 
 This module enables deploying your LangGraph agents to AWS Bedrock Agent Core Runtime.
+Supports TRUE STREAMING via async generators as per AWS documentation.
+Reference: https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/response-streaming.html
 """
 
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
@@ -10,12 +12,13 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph_checkpoint_aws import AgentCoreMemorySaver
 from langchain_aws import ChatBedrock
 from langchain_core.tools import tool
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 from datetime import datetime
-from typing import Annotated, TypedDict
+from typing import Annotated, TypedDict, AsyncGenerator
 import math
 import operator
 import os
+import json
 from browser_tool import get_browser_tool
 from code_interpreter_tool import get_code_interpreter_tool
 from langfuse_config import get_langfuse_handler, update_trace_context, flush_langfuse
@@ -220,26 +223,110 @@ When executing code, write clear, well-commented Python code and explain the res
 agent = create_agent()
 
 
-@app.entrypoint
-def invoke_agent(payload, context=None):
+def format_sse_event(event_type: str, data: dict) -> str:
+    """Format an event as SSE."""
+    return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+
+
+async def stream_agent_async(agent, input_data: dict, config: dict = None, session_id: str = "unknown", callbacks: list = None) -> AsyncGenerator[str, None]:
     """
-    Entrypoint for AWS Bedrock Agent Core Runtime.
+    Stream agent execution events using async generator.
     
-    This function is called by the runtime when the agent is invoked.
+    Uses LangGraph's astream() for TRUE async streaming as per AWS docs:
+    https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/response-streaming.html
+    
+    Yields:
+        SSE-formatted event strings as they happen in real-time
+    """
+    # Start event
+    yield format_sse_event("AGENT_START", {
+        "timestamp": datetime.now().isoformat(),
+        "session_id": session_id
+    })
+    
+    final_output = ""
+    
+    try:
+        # Add callbacks to config if provided
+        stream_config = config.copy() if config else {}
+        if callbacks:
+            stream_config["callbacks"] = callbacks
+        
+        # Use astream() for TRUE async streaming - events are yielded as they happen!
+        async for event in agent.astream(input_data, config=stream_config, stream_mode="updates"):
+            timestamp = datetime.now().isoformat()
+            
+            # Process each node's output immediately
+            for node_name, node_output in event.items():
+                if node_name == "chatbot":
+                    messages = node_output.get("messages", [])
+                    for msg in messages:
+                        if isinstance(msg, AIMessage):
+                            if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                                for tool_call in msg.tool_calls:
+                                    yield format_sse_event("TOOL_CALL", {
+                                        "timestamp": timestamp,
+                                        "tool": tool_call.get("name", "unknown"),
+                                        "args": tool_call.get("args", {})
+                                    })
+                            else:
+                                content = msg.content if hasattr(msg, 'content') else str(msg)
+                                final_output = content
+                                yield format_sse_event("LLM_RESPONSE", {
+                                    "timestamp": timestamp,
+                                    "content": content
+                                })
+                                
+                elif node_name == "tools":
+                    messages = node_output.get("messages", [])
+                    for msg in messages:
+                        if isinstance(msg, ToolMessage):
+                            yield format_sse_event("TOOL_RESULT", {
+                                "timestamp": timestamp,
+                                "tool": msg.name if hasattr(msg, 'name') else "unknown",
+                                "result": msg.content if hasattr(msg, 'content') else str(msg)
+                            })
+        
+        # End event
+        yield format_sse_event("AGENT_END", {
+            "timestamp": datetime.now().isoformat(),
+            "output": final_output
+        })
+        
+    except Exception as e:
+        yield format_sse_event("ERROR", {
+            "timestamp": datetime.now().isoformat(),
+            "error": str(e)
+        })
+
+
+@app.entrypoint
+async def invoke_agent(payload, context=None):
+    """
+    Async entrypoint for AWS Bedrock Agent Core Runtime with TRUE STREAMING.
+    
+    Uses async generator pattern as per AWS documentation:
+    https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/response-streaming.html
+    
+    When stream=True, yields SSE events in real-time using async for.
+    When stream=False, returns the final response string (blocking).
     
     Args:
         payload: Dictionary with keys:
             - 'prompt': User message (required)
             - 'session_id': Session ID for conversation continuity (optional)
             - 'actor_id': Actor ID for user/agent identification (optional)
+            - 'stream': If True, returns SSE stream (optional, default False)
         context: AgentCore runtime context (optional, contains memory_id)
         
     Returns:
-        Agent's response string
+        If stream=True: Async generator yielding SSE events in real-time
+        If stream=False: Agent's final response string
     """
     user_input = payload.get("prompt", "")
     session_id = payload.get("session_id", "default-session")
     actor_id = payload.get("actor_id", "default-actor")
+    use_streaming = payload.get("stream", False)
     
     # Get memory ID from context if available (AgentCore passes it here)
     memory_id = MEMORY_ID  # First try environment variable
@@ -280,7 +367,8 @@ def invoke_agent(payload, context=None):
             metadata={"request_source": payload.get("source", "api")},
         )
     
-    # If memory is enabled, pass configuration with thread_id and actor_id
+    # Build config
+    config = None
     if memory_id:
         config = {
             "configurable": {
@@ -292,23 +380,37 @@ def invoke_agent(payload, context=None):
                 "request_timestamp": datetime.now().isoformat(),
                 "request_source": payload.get("source", "api"),
             },
-            "callbacks": callbacks,
         }
         print(f"🔗 Using memory: {memory_id} for session: {session_id}")
-        # Invoke with memory configuration
-        response = agent.invoke(input_data, config=config)
     else:
         print("ℹ️  No memory configured, running without persistence")
-        # Invoke without memory configuration (but with callbacks if available)
-        config = {"callbacks": callbacks} if callbacks else {}
-        response = agent.invoke(input_data, config=config if config else None)
     
-    # Flush Langfuse traces before returning
-    if langfuse_handler:
-        flush_langfuse()
-    
-    # Extract the final message content
-    return response["messages"][-1].content
+    # STREAMING MODE: Use async generator for TRUE real-time streaming
+    if use_streaming:
+        print("📡 TRUE ASYNC STREAMING enabled")
+        # Yield events from async generator - each event is sent immediately!
+        async for event in stream_agent_async(agent, input_data, config, session_id, callbacks):
+            yield event
+        
+        # Flush Langfuse traces after streaming
+        if langfuse_handler:
+            flush_langfuse()
+    else:
+        # NON-STREAMING MODE: Blocking invoke, yield single result
+        invoke_config = config.copy() if config else {}
+        if callbacks:
+            invoke_config["callbacks"] = callbacks
+        
+        if invoke_config:
+            response = agent.invoke(input_data, config=invoke_config)
+        else:
+            response = agent.invoke(input_data)
+        
+        # Flush Langfuse traces before returning
+        if langfuse_handler:
+            flush_langfuse()
+        
+        yield response["messages"][-1].content
 
 
 if __name__ == "__main__":
