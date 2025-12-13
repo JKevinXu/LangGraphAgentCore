@@ -28,20 +28,27 @@ st.markdown("""
         border-bottom: 1px solid #333;
         margin-bottom: 1rem;
     }
-    .status-badge {
-        display: inline-block;
-        padding: 0.25rem 0.5rem;
+    .tool-call {
+        background-color: rgba(147, 197, 253, 0.3);
+        border-left: 3px solid #3b82f6;
+        padding: 0.5rem 1rem;
+        margin: 0.25rem 0;
         border-radius: 0.25rem;
-        font-size: 0.75rem;
-        margin-left: 0.5rem;
+        font-size: 0.85rem;
+        color: #000000;
     }
-    .status-connected {
-        background-color: #065f46;
-        color: #d1fae5;
+    .tool-result {
+        background-color: rgba(134, 239, 172, 0.3);
+        border-left: 3px solid #10b981;
+        padding: 0.5rem 1rem;
+        margin: 0.25rem 0;
+        border-radius: 0.25rem;
+        font-size: 0.85rem;
+        color: #000000;
     }
-    .status-disconnected {
-        background-color: #991b1b;
-        color: #fee2e2;
+    .tool-events-container {
+        margin-bottom: 0.75rem;
+        opacity: 0.8;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -49,9 +56,9 @@ st.markdown("""
 # Hard-coded BFF endpoint (deployed ALB)
 BFF_ENDPOINT = "http://LangGr-BffSe-aO1aJ7AQgiMd-1474248023.us-west-2.elb.amazonaws.com"
 
-# Initialize session state
+# Initialize session state - session_id must be at least 33 characters for AgentCore
 if "session_id" not in st.session_state:
-    st.session_state.session_id = f"streamlit-{uuid.uuid4().hex[:24]}"
+    st.session_state.session_id = f"streamlit-session-{uuid.uuid4().hex}"
 
 # Sidebar configuration
 with st.sidebar:
@@ -60,13 +67,16 @@ with st.sidebar:
     # New Conversation button - generates new session ID
     if st.button("🆕 New Conversation", type="primary", use_container_width=True):
         st.session_state.messages = []
-        st.session_state.session_id = f"streamlit-{uuid.uuid4().hex[:24]}"
+        st.session_state.session_id = f"streamlit-session-{uuid.uuid4().hex}"
         st.rerun()
     
     st.divider()
     
     # Streaming toggle
     use_streaming = st.toggle("Enable Streaming", value=True)
+    
+    # Show tool events toggle
+    show_tools = st.toggle("Show Tool Events", value=True)
     
     # Connection test
     if st.button("🔗 Test Connection", use_container_width=True):
@@ -84,7 +94,7 @@ with st.sidebar:
     
     # Display current session info
     st.caption(f"**Session ID:**")
-    st.code(st.session_state.session_id, language=None)
+    st.code(st.session_state.session_id[:20] + "...", language=None)
     
     st.divider()
     st.caption("LangGraphAgentCore BFF UI")
@@ -111,20 +121,21 @@ for message in st.session_state.messages:
         st.markdown(message["content"])
 
 
-def stream_response(bff_url: str, prompt: str, session_id: str) -> Generator[tuple[str, bool], None, None]:
+def stream_response(bff_url: str, prompt: str, session_id: str, show_tools: bool = True) -> Generator[dict, None, None]:
     """
     Stream response from BFF using SSE.
     
-    BFF handles parsing - frontend just receives clean content.
-    
-    SSE Events:
+    SSE Events from BFF:
     - event: start - Session started
-    - event: message - Content chunk (may be partial or complete)
+    - event: agent_start - Agent processing started
+    - event: tool_start - Tool being called
+    - event: tool_end - Tool finished
+    - event: message - Content chunk (may be partial or final)
     - event: done - Streaming complete
     - event: error - Error occurred
     
     Yields:
-        Tuple of (content, is_partial) - is_partial=True for streaming chunks
+        Dict with event type and data
     """
     try:
         with httpx.Client(timeout=120.0) as client:
@@ -135,7 +146,7 @@ def stream_response(bff_url: str, prompt: str, session_id: str) -> Generator[tup
                 headers={"Accept": "text/event-stream"}
             ) as response:
                 if response.status_code != 200:
-                    yield (f"Error: HTTP {response.status_code}", False)
+                    yield {"type": "error", "content": f"HTTP {response.status_code}"}
                     return
                 
                 buffer = ""
@@ -163,26 +174,44 @@ def stream_response(bff_url: str, prompt: str, session_id: str) -> Generator[tup
                                 except json.JSONDecodeError:
                                     data = {"content": line[6:]}
                         
-                        # Handle event types
-                        if event_type == "message":
+                        # Yield event based on type
+                        if event_type == "tool_start" and show_tools:
+                            yield {
+                                "type": "tool_start",
+                                "tool": data.get("tool", "unknown"),
+                                "args": data.get("args", {})
+                            }
+                        
+                        elif event_type == "tool_end" and show_tools:
+                            yield {
+                                "type": "tool_end",
+                                "tool": data.get("tool", "unknown"),
+                                "result": data.get("result", "")
+                            }
+                        
+                        elif event_type == "message":
                             content = data.get("content", "")
-                            is_partial = data.get("partial", True)
                             if content:
-                                yield (content, is_partial)
+                                yield {
+                                    "type": "message",
+                                    "content": content,
+                                    "partial": data.get("partial", True),
+                                    "final": data.get("final", False)
+                                }
                         
                         elif event_type == "error":
-                            yield (f"Error: {data.get('error', 'Unknown error')}", False)
+                            yield {"type": "error", "content": data.get("error", "Unknown error")}
                             return
                         
                         elif event_type == "done":
                             return
                             
     except httpx.TimeoutException:
-        yield ("Error: Request timed out. Please try again.", False)
+        yield {"type": "error", "content": "Request timed out. Please try again."}
     except httpx.ConnectError:
-        yield ("Error: Could not connect to BFF. Is the service running?", False)
+        yield {"type": "error", "content": "Could not connect to BFF. Is the service running?"}
     except Exception as e:
-        yield (f"Error: {e}", False)
+        yield {"type": "error", "content": str(e)}
 
 
 def get_response(bff_url: str, prompt: str, session_id: str) -> str:
@@ -212,22 +241,52 @@ if prompt := st.chat_input("Type your message..."):
     # Get assistant response
     with st.chat_message("assistant"):
         if use_streaming:
-            # Streaming response
-            response_placeholder = st.empty()
+            # Streaming response with tool events
+            response_container = st.container()
+            tool_events_placeholder = response_container.empty()
+            response_placeholder = response_container.empty()
+            
             full_response = ""
+            tool_events_html = []
             
-            for content, is_partial in stream_response(bff_url, prompt, session_id):
-                if content:
-                    if is_partial:
-                        # Partial chunk - this IS the accumulated content so far
+            for event in stream_response(bff_url, prompt, session_id, show_tools):
+                event_type = event.get("type")
+                
+                if event_type == "tool_start":
+                    tool_name = event.get("tool", "unknown")
+                    args = event.get("args", {})
+                    args_str = json.dumps(args) if args else ""
+                    tool_events_html.append(f'<div class="tool-call">🔧 Calling <b>{tool_name}</b>({args_str})</div>')
+                    # Update tool events display
+                    tool_events_placeholder.markdown(
+                        f'<div class="tool-events-container">{"".join(tool_events_html)}</div>',
+                        unsafe_allow_html=True
+                    )
+                
+                elif event_type == "tool_end":
+                    tool_name = event.get("tool", "unknown")
+                    result = event.get("result", "")
+                    # Truncate long results
+                    display_result = result[:100] + "..." if len(str(result)) > 100 else result
+                    tool_events_html.append(f'<div class="tool-result">✅ <b>{tool_name}</b> → {display_result}</div>')
+                    # Update tool events display
+                    tool_events_placeholder.markdown(
+                        f'<div class="tool-events-container">{"".join(tool_events_html)}</div>',
+                        unsafe_allow_html=True
+                    )
+                
+                elif event_type == "message":
+                    content = event.get("content", "")
+                    if content:
                         full_response = content
-                    else:
-                        # Final complete response
-                        full_response = content
-                    # Show with cursor indicator while streaming
-                    response_placeholder.markdown(full_response + " ▌")
+                        # Show response with cursor (keep tool events visible)
+                        response_placeholder.markdown(full_response + " ▌")
+                
+                elif event_type == "error":
+                    full_response = f"Error: {event.get('content', 'Unknown error')}"
+                    response_placeholder.error(full_response)
             
-            # Final display without cursor
+            # Final display without cursor (tool events remain visible)
             if full_response:
                 response_placeholder.markdown(full_response)
             else:
@@ -253,4 +312,3 @@ with col1:
     st.caption(f"Session: `{session_id[:20]}...`")
 with col2:
     st.caption(f"Messages: {len(st.session_state.messages)}")
-
