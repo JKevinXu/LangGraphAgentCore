@@ -8,6 +8,7 @@ import httpx
 import json
 import uuid
 from typing import Generator
+from utils import format_tool_start, format_tool_end, format_tool_events_container
 
 # Page config
 st.set_page_config(
@@ -255,23 +256,18 @@ if prompt := st.chat_input("Type your message..."):
                 if event_type == "tool_start":
                     tool_name = event.get("tool", "unknown")
                     args = event.get("args", {})
-                    args_str = json.dumps(args) if args else ""
-                    tool_events_html.append(f'<div class="tool-call">🔧 Calling <b>{tool_name}</b>({args_str})</div>')
-                    # Update tool events display
+                    tool_events_html.append(format_tool_start(tool_name, args))
                     tool_events_placeholder.markdown(
-                        f'<div class="tool-events-container">{"".join(tool_events_html)}</div>',
+                        format_tool_events_container(tool_events_html),
                         unsafe_allow_html=True
                     )
                 
                 elif event_type == "tool_end":
                     tool_name = event.get("tool", "unknown")
                     result = event.get("result", "")
-                    # Truncate long results
-                    display_result = result[:100] + "..." if len(str(result)) > 100 else result
-                    tool_events_html.append(f'<div class="tool-result">✅ <b>{tool_name}</b> → {display_result}</div>')
-                    # Update tool events display
+                    tool_events_html.append(format_tool_end(tool_name, result))
                     tool_events_placeholder.markdown(
-                        f'<div class="tool-events-container">{"".join(tool_events_html)}</div>',
+                        format_tool_events_container(tool_events_html),
                         unsafe_allow_html=True
                     )
                 
