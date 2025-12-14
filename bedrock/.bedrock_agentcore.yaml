@@ -30,7 +30,7 @@ agents:
     bedrock_agentcore:
       agent_id: langgraph_agent-1NyH76Cfc7
       agent_arn: arn:aws:bedrock-agentcore:us-west-2:313117444016:runtime/langgraph_agent-1NyH76Cfc7
-      agent_session_id: null
+      agent_session_id: dae9d2a0-9c80-454b-adc0-6f3179dace73
     codebuild:
       project_name: bedrock-agentcore-langgraph_agent-builder
       execution_role: arn:aws:iam::313117444016:role/AmazonBedrockAgentCoreSDKCodeBuild-us-west-2-cc650878d6

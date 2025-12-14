@@ -2,7 +2,7 @@
   "app": "python3 app.py",
   "context": {
     "region": "us-west-2",
-    "agent_runtime_arn": ""
+    "agent_runtime_arn": "arn:aws:bedrock-agentcore:us-west-2:313117444016:runtime/langgraph_agent-1NyH76Cfc7"
   },
   "watch": {
     "include": ["**"],

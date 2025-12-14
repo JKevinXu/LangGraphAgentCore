@@ -202,6 +202,13 @@ async def stream_agent_async(agent, input_data: dict, config: dict = None, sessi
         "session_id": session_id
     })
     
+    # Thinking event - immediate feedback while LLM reasons
+    yield format_sse_event("THINKING", {
+        "timestamp": datetime.now().isoformat(),
+        "status": "reasoning",
+        "message": "Analyzing your request..."
+    })
+    
     final_output = ""
     
     try:

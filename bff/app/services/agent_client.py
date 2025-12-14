@@ -149,7 +149,6 @@ class AgentClient:
                         
                         # Try to parse and forward the response
                         try:
-                            import json
                             parsed = json.loads(full_data)
                             if isinstance(parsed, str):
                                 await callback.push_event("message", {
@@ -262,7 +261,12 @@ class AgentClient:
         if event_type and event_data:
             logger.info(f"Pushing event: {event_type}")
             
-            if event_type == "TOOL_CALL":
+            if event_type == "THINKING":
+                await callback.push_event("thinking", {
+                    "status": event_data.get("status", "reasoning"),
+                    "message": event_data.get("message", "Thinking...")
+                })
+            elif event_type == "TOOL_CALL":
                 await callback.push_event("tool_start", {
                     "tool": event_data.get("tool", "unknown"),
                     "args": event_data.get("args", {})

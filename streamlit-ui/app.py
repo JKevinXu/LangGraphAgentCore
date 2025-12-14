@@ -176,7 +176,13 @@ def stream_response(bff_url: str, prompt: str, session_id: str, show_tools: bool
                                     data = {"content": line[6:]}
                         
                         # Yield event based on type
-                        if event_type == "tool_start" and show_tools:
+                        if event_type == "thinking":
+                            yield {
+                                "type": "thinking",
+                                "message": data.get("message", "Thinking...")
+                            }
+                        
+                        elif event_type == "tool_start" and show_tools:
                             yield {
                                 "type": "tool_start",
                                 "tool": data.get("tool", "unknown"),
@@ -253,7 +259,15 @@ if prompt := st.chat_input("Type your message..."):
             for event in stream_response(bff_url, prompt, session_id, show_tools):
                 event_type = event.get("type")
                 
-                if event_type == "tool_start":
+                if event_type == "thinking":
+                    message = event.get("message", "Thinking...")
+                    tool_events_html.append(f'<div class="thinking-event">🧠 <i>{message}</i></div>')
+                    tool_events_placeholder.markdown(
+                        format_tool_events_container(tool_events_html),
+                        unsafe_allow_html=True
+                    )
+                
+                elif event_type == "tool_start":
                     tool_name = event.get("tool", "unknown")
                     args = event.get("args", {})
                     tool_events_html.append(format_tool_start(tool_name, args))
