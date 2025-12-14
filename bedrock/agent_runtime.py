@@ -15,8 +15,6 @@ from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 from datetime import datetime
 from typing import Annotated, TypedDict, AsyncGenerator
-import math
-import operator
 import os
 import json
 from browser_tool import get_browser_tool
@@ -50,59 +48,6 @@ class CustomAgentState(TypedDict):
     code_execution_history: list  # Code interpreter execution history
 
 
-# Define tools using LangChain's @tool decorator
-@tool
-def calculator(expression: str) -> str:
-    """
-    Calculate the result of a mathematical expression.
-    
-    Args:
-        expression: A mathematical expression as a string (e.g., "2 + 3 * 4", "sqrt(16)")
-    
-    Returns:
-        The result of the calculation as a string
-    """
-    try:
-        # Define safe functions that can be used in expressions
-        safe_dict = {
-            "__builtins__": {},
-            "abs": abs, "round": round, "min": min, "max": max,
-            "sum": sum, "pow": pow,
-            # Math functions
-            "sqrt": math.sqrt, "sin": math.sin, "cos": math.cos, "tan": math.tan,
-            "log": math.log, "log10": math.log10, "exp": math.exp,
-            "pi": math.pi, "e": math.e,
-            "ceil": math.ceil, "floor": math.floor,
-        }
-        
-        # Evaluate the expression safely
-        result = eval(expression, safe_dict)
-        return str(result)
-        
-    except ZeroDivisionError:
-        return "Error: Division by zero"
-    except ValueError as e:
-        return f"Error: Invalid value - {str(e)}"
-    except SyntaxError:
-        return "Error: Invalid mathematical expression"
-    except Exception as e:
-        return f"Error: {str(e)}"
-
-
-@tool
-def get_weather(location: str) -> str:
-    """
-    Get weather for a location (demo implementation).
-    
-    Args:
-        location: The location to get weather for
-        
-    Returns:
-        Weather description
-    """
-    return f"The weather in {location} is sunny!"
-
-
 # Create agent with Bedrock model
 def create_agent():
     """Create and configure the LangGraph agent with Bedrock and memory support."""
@@ -113,35 +58,48 @@ def create_agent():
         model_kwargs={"temperature": 0.7}
     )
     
-    # Get browser tool (optional - gracefully degrades if unavailable)
+    # Get browser tool (enabled by default in supported regions)
     browser_tool = get_browser_tool()
     
-    # Get code interpreter tool (optional - gracefully degrades if unavailable)
+    # Get code interpreter tool (enabled by default)
     code_tool = get_code_interpreter_tool()
     
-    # Bind tools to the LLM
-    tools = [calculator, get_weather]
+    # Bind tools to the LLM - only AgentCore tools (browser + code interpreter)
+    tools = []
+    
     if browser_tool:
         tools.append(browser_tool)
-        print("✅ Browser tool enabled")
+        print("✅ Browser tool enabled (AgentCore Browser)")
+    else:
+        print("⚠️  Browser tool unavailable - check IAM permissions for bedrock-agentcore:ConnectBrowserAutomationStream")
+    
     if code_tool:
         tools.append(code_tool)
-        print("✅ Code Interpreter tool enabled")
+        print("✅ Code Interpreter tool enabled (AgentCore Code Interpreter)")
+    else:
+        print("⚠️  Code Interpreter unavailable - check IAM permissions")
     
-    if not browser_tool and not code_tool:
-        print("ℹ️  Advanced tools not available - agent will run with calculator and weather only")
+    if not tools:
+        raise RuntimeError("No tools available! Check IAM permissions for AgentCore Browser and Code Interpreter.")
     
     llm_with_tools = llm.bind_tools(tools)
     
     # System message
-    system_message = """You're a helpful assistant with the following capabilities:
-- Perform mathematical calculations
-- Check weather information
-- Browse websites and extract information (when available)
-- Execute Python code in a secure environment (when available)
+    system_message = """You're a helpful assistant powered by AWS Bedrock AgentCore with the following capabilities:
 
-When browsing the web, navigate to URLs and extract the requested information accurately.
-When executing code, write clear, well-commented Python code and explain the results."""
+1. **Code Interpreter** (execute_code): Execute Python code in a secure sandboxed environment
+   - Run calculations, data analysis, and algorithms
+   - Use libraries like NumPy, Pandas, Matplotlib
+   - Generate visualizations and process data
+
+2. **Web Browser** (browse_web): Browse websites and extract information
+   - Navigate to URLs and extract content
+   - Search for information online
+   - Interact with web pages
+
+When asked to calculate something, use the code interpreter to write and execute Python code.
+When asked about current information or websites, use the browser tool.
+Always explain your results clearly."""
     
     # Define the chatbot node with custom state handling
     def chatbot(state: CustomAgentState):

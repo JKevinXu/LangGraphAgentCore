@@ -101,55 +101,64 @@ def execute_code(code: str) -> str:
     - Perform data analysis and computations
     - Generate visualizations
     - Work with files and data
-    - Install and use Python packages
+    - Use Python packages (NumPy, Pandas, Matplotlib, etc.)
     
     Args:
         code: Python code to execute as a string
     
     Returns:
-        Result of the code execution including output and any generated files
+        Result of the code execution including stdout, stderr, and exit code
         
     Example:
         >>> result = execute_code(
         ...     code="import numpy as np\\nprint(np.array([1,2,3]).mean())"
         ... )
-        
-    Note:
-        Code execution results are automatically stored in the agent's memory for future reference.
-        The agent can reference previous code outputs and generated files across conversations.
     """
+    import json
+    
     try:
-        timestamp = datetime.utcnow().isoformat()
-        
-        # Create a code interpreter session
-        with code_session(REGION) as client:
-            # Execute the code
-            # Note: The actual API call depends on the CodeInterpreter implementation
-            # For now, we'll create a session and return structured feedback
-            result = f"""💻 Code Execution Session
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📅 Timestamp: {timestamp}
-🐍 Language: Python
-📝 Code:
-```python
-{code}
-```
-
-✅ Status: Code interpreter session created successfully
-
-⚠️  Note: Full code execution integration is ready. The session has been 
-established with the AgentCore Code Interpreter service.
-
-Environment Details:
-- Sandboxed Python environment
-- Access to common scientific libraries (NumPy, Pandas, Matplotlib, etc.)
-- Secure file I/O within session scope
-- Network isolated for security
-
-This code execution has been recorded in your conversation history for future reference.
-"""
+        # Execute code using AgentCore Code Interpreter
+        # Reference: https://github.com/awslabs/amazon-bedrock-agentcore-samples
+        with code_session(REGION) as code_client:
+            response = code_client.invoke("executeCode", {
+                "code": code,
+                "language": "python",
+                "clearContext": False  # Maintain state between executions
+            })
             
-            return result
+            # Process the streaming response
+            result_text = ""
+            for event in response["stream"]:
+                event_result = event.get("result", {})
+                
+                # Extract structured content if available
+                structured = event_result.get("structuredContent", {})
+                if structured:
+                    stdout = structured.get("stdout", "")
+                    stderr = structured.get("stderr", "")
+                    exit_code = structured.get("exitCode", 0)
+                    exec_time = structured.get("executionTime", "N/A")
+                    
+                    result_text = f"📤 Output:\n{stdout}" if stdout else ""
+                    if stderr:
+                        result_text += f"\n⚠️ Stderr:\n{stderr}"
+                    if exit_code != 0:
+                        result_text += f"\n❌ Exit code: {exit_code}"
+                    else:
+                        result_text += f"\n✅ Executed in {exec_time}ms"
+                else:
+                    # Fallback to content array
+                    content = event_result.get("content", [])
+                    for item in content:
+                        if item.get("type") == "text":
+                            result_text += item.get("text", "")
+                
+                # Return first result
+                if result_text:
+                    return result_text
+            
+            # If no result, return the raw response
+            return json.dumps(response, default=str)
             
     except Exception as e:
         return f"❌ Error executing code: {str(e)}"
